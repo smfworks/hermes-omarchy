@@ -52,9 +52,9 @@ Tested on Omarchy (Arch, Hyprland) with Hermes git-install v0.20.6, Ollama
 Sequenced with the vault's [[hermes-omarchy-integration-plan]]:
 
 - **W1** — Omarchy agent skill symlinked for Hermes — done (installer + upstream PR)
-- **W2** — `hermes` as an `omarchy default agent` option — upstream PR
-- **W3** — `omarchy-theme-set-hermes` — upstream PR
-- **W4** — `omarchy-agent-usage-hermes` collector — upstream PR
+- **W2** — `hermes` as an `omarchy default agent` option — closed #8617 in favor of #7392
+- **W3** — `omarchy-theme-set-hermes` — closed #8622 in favor of #6644
+- **W4** — `omarchy-agent-usage-hermes` collector — closed #8626 in favor of #6647
 - **W5** — Hermes plugin wrapping the `omarchy` CLI + shell IPC — done (this installer)
 - **W6** — Omarchy shell widget `smf.hermes` — done (copied by this installer; also https://github.com/smfworks/smf-hermes)
 
