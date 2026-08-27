@@ -26,7 +26,8 @@ OMARCHY="${OMARCHY_PATH:-/usr/share/omarchy}"
 AUTOSTART_LUA="$HOME/.config/hypr/autostart.lua"
 DESKTOP_ENTRY="$HOME/.local/share/applications/hermes.desktop"
 OLLAMA_UNIT="$HOME/.config/systemd/user/ollama.service"
-AUTOSTART_LINE='o.launch_on_start("hermes")'
+AUTOSTART_LINE='o.launch_on_start("hermes desktop")'
+AUTOSTART_LINE_OLD='o.launch_on_start("hermes")'
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PLUGIN_SRC="$REPO_ROOT/plugin"
@@ -190,12 +191,19 @@ install_autostart() {
   mkdir -p "$(dirname "$AUTOSTART_LUA")"
   touch "$AUTOSTART_LUA"
 
+  if grep -qF -- "$AUTOSTART_LINE_OLD" "$AUTOSTART_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    grep -vF -- "$AUTOSTART_LINE_OLD" "$AUTOSTART_LUA" >"$tmp" || true
+    mv "$tmp" "$AUTOSTART_LUA"
+    ok "removed stale o.launch_on_start(\"hermes\") (CLI, exits with no TTY)"
+  fi
   if grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
     ok "autostart line already present"
     return 0
   fi
   printf '%s\n' "$AUTOSTART_LINE" >>"$AUTOSTART_LUA"
-  ok "added o.launch_on_start(\"hermes\") — fires on next Hyprland session"
+  ok "added o.launch_on_start(\"hermes desktop\") — fires on next Hyprland session"
 }
 
 # --- Omarchy agent skills ----------------------------------------------------
@@ -423,10 +431,10 @@ remove_parts() {
   local all="${1:-}"
   step "Remove"
 
-  if [[ -f $AUTOSTART_LUA ]] && grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
+  if [[ -f $AUTOSTART_LUA ]] && grep -qE -- 'o\.launch_on_start\("hermes( desktop)?"\)' "$AUTOSTART_LUA"; then
     local tmp
     tmp="$(mktemp)"
-    grep -vF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA" >"$tmp" || true
+    grep -vE -- 'o\.launch_on_start\("hermes( desktop)?"\)' "$AUTOSTART_LUA" >"$tmp" || true
     mv "$tmp" "$AUTOSTART_LUA"
     ok "removed autostart line"
   else

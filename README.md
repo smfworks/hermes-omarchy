@@ -13,7 +13,7 @@ on any Omarchy machine:
 |---|---|
 | Ollama | systemd **user** service (`WantedBy=default.target`), enabled at login, verified serving `127.0.0.1:11434`. Uses the existing unit if present. |
 | Desktop entry | Writes `~/.local/share/applications/hermes.desktop` pointing at the **self-contained venv launcher** (`~/.hermes/hermes-agent/venv/bin/hermes desktop`) — survives Python upgrades, unlike entries pinning a mise/python-version path. |
-| Autostart | Adds `o.launch_on_start("hermes")` to `~/.config/hypr/autostart.lua` — the Omarchy-native verb. Resolves the desktop entry via `uwsm-app` at `hyprland.start`. |
+| Autostart | Adds `o.launch_on_start("hermes desktop")` to `~/.config/hypr/autostart.lua`. Bare `hermes` is the CLI and exits with no TTY (~1.5s). |
 | Skills | Symlinks Omarchy's `omarchy` and `diagnose-crash` skills into `~/.hermes/skills` and every `~/.hermes/profiles/*/skills`. Same contract as `omarchy-provision-user`. |
 | Plugin | Symlinks this repo's `plugin/` into `~/.hermes/plugins/omarchy` (and existing profiles) and runs `hermes plugins enable omarchy`. Allowlisted theme/plugin/bar/menu/screenshot/shell-ping verbs; `--yes` on mutating plugin commands. Hidden off non-Omarchy hosts. |
 
@@ -47,8 +47,7 @@ bin/hermes-omarchy-setup install     # or: check | remove
   login (default.target), no graphical session needed.
 - **Desktop entry: venv launcher, not mise python.** Mise paths bake in a
   Python version; the first `mise` upgrade breaks the entry.
-- **Autostart: `o.launch_on_start`, not `exec-once`.** Goes through uwsm-app →
-  desktop entry → proper Wayland/uwsm session integration.
+- **Autostart: `o.launch_on_start("hermes desktop")`, not `exec-once`, not bare `hermes`.** `uwsm-app` at `hyprland.start`. Bare `hermes` is the CLI and dies without a TTY.
 - **Idempotent + reversible.** `check` mode for health probes; `remove` for
   teardown; nothing force-overwritten silently.
 
