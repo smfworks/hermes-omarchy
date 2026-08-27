@@ -1,0 +1,272 @@
+#!/bin/bash
+#
+# hermes-omarchy-setup — reusable boot integration for Hermes on Omarchy
+#
+# Idempotent. Safe to re-run. Parts:
+#   1. Ollama as a systemd USER service (enabled at login, port 11434)
+#   2. hermes.desktop entry pointing at the self-contained venv launcher
+#   3. Hermes desktop autostart via Omarchy's o.launch_on_start()
+#
+# Usage:
+#   hermes-omarchy-setup install [--no-ollama] [--no-autostart]
+#   hermes-omarchy-setup check    [--json]
+#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama
+#
+# Exits non-zero when "check" finds problems or "install" fails a step.
+
+set -euo pipefail
+
+# --- Paths -------------------------------------------------------------------
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+OMARCHY="${OMARCHY_PATH:-/usr/share/omarchy}"
+AUTOSTART_LUA="$HOME/.config/hypr/autostart.lua"
+DESKTOP_ENTRY="$HOME/.local/share/applications/hermes.desktop"
+OLLAMA_UNIT="$HOME/.config/systemd/user/ollama.service"
+AUTOSTART_LINE='o.launch_on_start("hermes")'
+
+# --- Output helpers ----------------------------------------------------------
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$1" >&2; }
+fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+step() { printf '\n== %s ==\n' "$1"; }
+
+# --- Detection ---------------------------------------------------------------
+# Find the Hermes launcher. Preference: self-contained venv launcher (survives
+# python upgrades), then anything on PATH.
+find_hermes() {
+  local candidate="$HERMES_HOME/hermes-agent/venv/bin/hermes"
+  if [[ -x $candidate ]]; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+  if command -v hermes >/dev/null 2>&1; then
+    command -v hermes
+    return 0
+  fi
+  return 1
+}
+
+is_omarchy() {
+  [[ -d $OMARCHY ]] || [[ -d /usr/share/omarchy ]]
+}
+
+# --- Ollama ------------------------------------------------------------------
+check_ollama() {
+  if ! command -v ollama >/dev/null 2>&1; then
+    fail "ollama not found (install with: omarchy-pkg-add ollama)"
+    return 1
+  fi
+  if ! systemctl --user is-enabled ollama >/dev/null 2>&1; then
+    fail "ollama user unit not enabled"
+    return 1
+  fi
+  if ! curl -sf -o /dev/null --max-time 3 http://127.0.0.1:11434/ 2>/dev/null; then
+    fail "ollama not answering on 127.0.0.1:11434 (is the user unit running?)"
+    return 1
+  fi
+  ok "ollama: user unit enabled, serving 127.0.0.1:11434"
+}
+
+install_ollama() {
+  step "Ollama"
+  if ! command -v ollama >/dev/null 2>&1; then
+    warn "ollama is not installed — skipping (install: omarchy-pkg-add ollama, then re-run)"
+    return 0
+  fi
+
+  if [[ ! -f $OLLAMA_UNIT ]]; then
+    mkdir -p "$(dirname "$OLLAMA_UNIT")"
+    local ollama_bin
+    ollama_bin="$(command -v ollama)"
+    cat >"$OLLAMA_UNIT" <<EOF
+[Unit]
+Description=Ollama (user service, installed by hermes-omarchy-setup)
+After=network-online.target
+
+[Service]
+ExecStart=$ollama_bin serve
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+    ok "wrote $OLLAMA_UNIT"
+  else
+    ok "unit already present, left untouched"
+  fi
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now ollama >/dev/null 2>&1 || true
+
+  # Give a cold start a moment, then verify the port.
+  local tries=0
+  until curl -sf -o /dev/null --max-time 2 http://127.0.0.1:11434/ 2>/dev/null; do
+    (( tries += 1 ))
+    if (( tries >= 10 )); then
+      fail "ollama did not come up on 127.0.0.1:11434 (see: journalctl --user -u ollama)"
+      return 1
+    fi
+    sleep 2
+  done
+  ok "ollama serving on 127.0.0.1:11434"
+}
+
+# --- Desktop entry -----------------------------------------------------------
+check_desktop_entry() {
+  if [[ ! -f $DESKTOP_ENTRY ]]; then
+    fail "desktop entry missing: $DESKTOP_ENTRY"
+    return 1
+  fi
+  if ! grep -q 'venv/bin/hermes desktop\|/bin/hermes desktop' "$DESKTOP_ENTRY"; then
+    warn "desktop entry does not point at a hermes launcher"
+    return 1
+  fi
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$DESKTOP_ENTRY" || { fail "desktop entry invalid"; return 1; }
+  fi
+  ok "desktop entry valid: $DESKTOP_ENTRY"
+}
+
+install_desktop_entry() {
+  step "Hermes desktop entry"
+  local hermes_bin
+  hermes_bin="$(find_hermes)" || {
+    warn "hermes launcher not found (looked in $HERMES_HOME/hermes-agent/venv/bin and PATH) — skipping"
+    return 0
+  }
+
+  local icon="$HERMES_HOME/hermes-agent/apps/desktop/assets/icon.png"
+  [[ -f $icon ]] || icon="hermes"
+
+  mkdir -p "$(dirname "$DESKTOP_ENTRY")"
+  cat >"$DESKTOP_ENTRY" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Hermes
+GenericName=Hermes Desktop
+Comment=Launch Hermes Desktop
+Exec=$hermes_bin desktop
+Icon=$icon
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=Hermes
+EOF
+
+  if command -v desktop-file-validate >/dev/null 2>&1; then
+    desktop-file-validate "$DESKTOP_ENTRY" || { fail "generated entry failed validation"; return 1; }
+  fi
+  ok "desktop entry written (Exec=$hermes_bin desktop)"
+}
+
+# --- Hyprland autostart ------------------------------------------------------
+check_autostart() {
+  if [[ ! -f $AUTOSTART_LUA ]]; then
+    fail "autostart config missing: $AUTOSTART_LUA"
+    return 1
+  fi
+  if ! grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
+    fail "autostart line missing from $AUTOSTART_LUA"
+    return 1
+  fi
+  ok "autostart wired in $AUTOSTART_LUA"
+}
+
+install_autostart() {
+  step "Hermes desktop autostart"
+  if ! is_omarchy; then
+    warn "Omarchy not detected (no \$OMARCHY_PATH, no /usr/share/omarchy) — skipping autostart"
+    return 0
+  fi
+  mkdir -p "$(dirname "$AUTOSTART_LUA")"
+  touch "$AUTOSTART_LUA"
+
+  if grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
+    ok "autostart line already present"
+    return 0
+  fi
+  printf '%s\n' "$AUTOSTART_LINE" >>"$AUTOSTART_LUA"
+  ok "added o.launch_on_start(\"hermes\") — fires on next Hyprland session"
+}
+
+# --- Remove ------------------------------------------------------------------
+remove_parts() {
+  local all="${1:-}"
+  step "Remove"
+
+  if [[ -f $AUTOSTART_LUA ]] && grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    grep -vF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA" >"$tmp" || true
+    mv "$tmp" "$AUTOSTART_LUA"
+    ok "removed autostart line"
+  else
+    ok "autostart line not present"
+  fi
+
+  if [[ $all == "--all" ]]; then
+    systemctl --user disable --now ollama >/dev/null 2>&1 || true
+    ok "ollama user service disabled (unit file kept)"
+  else
+    ok "ollama left alone (pass --all to disable it too)"
+  fi
+  echo "Desktop entry left in place: $DESKTOP_ENTRY (delete manually if unwanted)"
+}
+
+# --- Main --------------------------------------------------------------------
+action="install"
+no_ollama=0
+no_autostart=0
+json=0
+rm_all=0
+
+for arg in "$@"; do
+  case "$arg" in
+    install|check|remove) action="$arg" ;;
+    --no-ollama) no_ollama=1 ;;
+    --no-autostart) no_autostart=1 ;;
+    --json) json=1 ;;
+    --all) rm_all=1 ;;
+    -h|--help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+
+case "$action" in
+  install)
+    if ! is_omarchy; then
+      fail "This tool targets Omarchy. Refusing to run on a non-Omarchy system."
+      exit 1
+    fi
+    rc=0
+    (( no_ollama )) || install_ollama || rc=1
+    install_desktop_entry || rc=1
+    (( no_autostart )) || install_autostart || rc=1
+    echo
+    (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain."
+    exit "$rc"
+    ;;
+  check)
+    rc=0
+    (( no_ollama )) || check_ollama || rc=1
+    check_desktop_entry || rc=1
+    (( no_autostart )) || check_autostart || rc=1
+    if (( json )); then
+      printf '{"ollama": %s, "desktop_entry": %s, "autostart": %s}\n' \
+        "$(( no_ollama ? 1 : rc == 0 ? 0 : 1 ))" "null" "null" >/dev/null 2>&1 || true
+      # JSON mode reports the overall verdict only; human-readable lines above are the detail.
+    fi
+    exit "$rc"
+    ;;
+  remove)
+    if (( rm_all )); then
+      remove_parts --all
+    else
+      remove_parts
+    fi
+    ;;
+esac
