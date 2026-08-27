@@ -6,11 +6,12 @@
 #   1. Ollama as a systemd USER service (enabled at login, port 11434)
 #   2. hermes.desktop entry pointing at the self-contained venv launcher
 #   3. Hermes desktop autostart via Omarchy's o.launch_on_start()
+#   4. Omarchy agent skills (omarchy, diagnose-crash) symlinked into Hermes
 #
 # Usage:
-#   hermes-omarchy-setup install [--no-ollama] [--no-autostart]
+#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills]
 #   hermes-omarchy-setup check    [--json]
-#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama
+#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama + unlinks skills
 #
 # Exits non-zero when "check" finds problems or "install" fails a step.
 
@@ -190,6 +191,90 @@ install_autostart() {
   ok "added o.launch_on_start(\"hermes\") — fires on next Hyprland session"
 }
 
+# --- Omarchy agent skills ----------------------------------------------------
+# Same contract as omarchy-provision-user: symlink every directory under
+# $OMARCHY_PATH/default/agents/skills into Hermes skill roots (default home
+# plus every existing profile). Symlinks, not copies, so omarchy update /
+# omarchy dev link keep the target current.
+
+skills_source() {
+  printf '%s' "${OMARCHY:-/usr/share/omarchy}/default/agents/skills"
+}
+
+hermes_skill_dests() {
+  local dests=("$HOME/.hermes/skills")
+  local profile
+  if [[ -d $HOME/.hermes/profiles ]]; then
+    for profile in "$HOME"/.hermes/profiles/*/; do
+      [[ -d $profile ]] || continue
+      dests+=("${profile}skills")
+    done
+  fi
+  printf '%s\n' "${dests[@]}"
+}
+
+check_skills() {
+  local src dest name skill
+  src="$(skills_source)"
+  if [[ ! -d $src ]]; then
+    fail "Omarchy skills source missing: $src"
+    return 1
+  fi
+  local rc=0
+  while IFS= read -r dest; do
+    for skill in "$src"/*/; do
+      [[ -d $skill ]] || continue
+      name=${skill%/}
+      name=${name##*/}
+      if [[ ! -L $dest/$name ]]; then
+        fail "skill link missing: $dest/$name"
+        rc=1
+        continue
+      fi
+      if [[ $(readlink "$dest/$name") != "$src/$name" ]]; then
+        fail "skill link $dest/$name does not point at $src/$name"
+        rc=1
+      fi
+    done
+  done < <(hermes_skill_dests)
+  (( rc == 0 )) && ok "Omarchy skills linked into Hermes skill dirs"
+  return "$rc"
+}
+
+install_skills() {
+  step "Omarchy agent skills"
+  local src dest name skill
+  src="$(skills_source)"
+  if [[ ! -d $src ]]; then
+    warn "Omarchy skills source missing: $src — skipping"
+    return 0
+  fi
+  while IFS= read -r dest; do
+    mkdir -p "$dest"
+    for skill in "$src"/*/; do
+      [[ -d $skill ]] || continue
+      name=${skill%/}
+      name=${name##*/}
+      ln -sfn "$src/$name" "$dest/$name"
+      ok "linked $dest/$name"
+    done
+  done < <(hermes_skill_dests)
+}
+
+unlink_skills() {
+  local src dest name
+  src="$(skills_source)"
+  while IFS= read -r dest; do
+    [[ -d $dest ]] || continue
+    for name in omarchy diagnose-crash; do
+      if [[ -L $dest/$name ]] && [[ $(readlink "$dest/$name") == "$src/$name" ]]; then
+        rm -f "$dest/$name"
+        ok "unlinked $dest/$name"
+      fi
+    done
+  done < <(hermes_skill_dests)
+}
+
 # --- Remove ------------------------------------------------------------------
 remove_parts() {
   local all="${1:-}"
@@ -208,8 +293,9 @@ remove_parts() {
   if [[ $all == "--all" ]]; then
     systemctl --user disable --now ollama >/dev/null 2>&1 || true
     ok "ollama user service disabled (unit file kept)"
+    unlink_skills
   else
-    ok "ollama left alone (pass --all to disable it too)"
+    ok "ollama and skills left alone (pass --all to disable ollama and unlink skills)"
   fi
   echo "Desktop entry left in place: $DESKTOP_ENTRY (delete manually if unwanted)"
 }
@@ -218,6 +304,7 @@ remove_parts() {
 action="install"
 no_ollama=0
 no_autostart=0
+no_skills=0
 json=0
 rm_all=0
 
@@ -226,6 +313,7 @@ for arg in "$@"; do
     install|check|remove) action="$arg" ;;
     --no-ollama) no_ollama=1 ;;
     --no-autostart) no_autostart=1 ;;
+    --no-skills) no_skills=1 ;;
     --json) json=1 ;;
     --all) rm_all=1 ;;
     -h|--help)
@@ -246,8 +334,9 @@ case "$action" in
     (( no_ollama )) || install_ollama || rc=1
     install_desktop_entry || rc=1
     (( no_autostart )) || install_autostart || rc=1
+    (( no_skills )) || install_skills || rc=1
     echo
-    (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain."
+    (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain. Skills take effect on the next Hermes session."
     exit "$rc"
     ;;
   check)
@@ -255,6 +344,7 @@ case "$action" in
     (( no_ollama )) || check_ollama || rc=1
     check_desktop_entry || rc=1
     (( no_autostart )) || check_autostart || rc=1
+    (( no_skills )) || check_skills || rc=1
     if (( json )); then
       printf '{"ollama": %s, "desktop_entry": %s, "autostart": %s}\n' \
         "$(( no_ollama ? 1 : rc == 0 ? 0 : 1 ))" "null" "null" >/dev/null 2>&1 || true
