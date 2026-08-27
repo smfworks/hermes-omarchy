@@ -8,11 +8,12 @@
 #   3. Hermes desktop autostart via Omarchy's o.launch_on_start()
 #   4. Omarchy agent skills (omarchy, diagnose-crash) symlinked into Hermes
 #   5. Hermes plugin wrapping allowlisted `omarchy` verbs
+#   6. Omarchy shell widget smf.hermes (copied, never symlinked)
 #
 # Usage:
-#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin]
+#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin] [--no-shell-plugin]
 #   hermes-omarchy-setup check    [--json]
-#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama + unlinks skills/plugin
+#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama + unlinks skills/plugin/shell widget
 #
 # Exits non-zero when "check" finds problems or "install" fails a step.
 
@@ -28,6 +29,7 @@ AUTOSTART_LINE='o.launch_on_start("hermes")'
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PLUGIN_SRC="$REPO_ROOT/plugin"
+SHELL_PLUGIN_SRC="$REPO_ROOT/shell-plugin"
 
 # --- Output helpers ----------------------------------------------------------
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -360,6 +362,61 @@ unlink_plugin() {
   done
 }
 
+SHELL_PLUGIN_DEST="$HOME/.config/omarchy/plugins/smf.hermes"
+
+check_shell_plugin() {
+  if [[ ! -f $SHELL_PLUGIN_SRC/manifest.json ]]; then
+    fail "shell plugin source missing: $SHELL_PLUGIN_SRC"
+    return 1
+  fi
+  if [[ ! -f $SHELL_PLUGIN_DEST/manifest.json ]]; then
+    fail "shell plugin not installed: $SHELL_PLUGIN_DEST"
+    return 1
+  fi
+  if [[ -L $SHELL_PLUGIN_DEST ]]; then
+    fail "shell plugin must be a real directory, not a symlink: $SHELL_PLUGIN_DEST"
+    return 1
+  fi
+  if ! omarchy plugin validate "$SHELL_PLUGIN_DEST" >/dev/null; then
+    fail "smf.hermes failed omarchy plugin validate"
+    return 1
+  fi
+  ok "smf.hermes installed and valid"
+}
+
+install_shell_plugin() {
+  step "Omarchy shell widget smf.hermes"
+  if [[ ! -f $SHELL_PLUGIN_SRC/manifest.json ]]; then
+    warn "shell plugin source missing: $SHELL_PLUGIN_SRC — skipping"
+    return 0
+  fi
+  mkdir -p "$(dirname "$SHELL_PLUGIN_DEST")"
+  mkdir -p "$SHELL_PLUGIN_DEST"
+  cp -a "$SHELL_PLUGIN_SRC/." "$SHELL_PLUGIN_DEST/"
+  if ! omarchy plugin validate "$SHELL_PLUGIN_DEST"; then
+    fail "copied smf.hermes failed validation"
+    return 1
+  fi
+  ok "copied $SHELL_PLUGIN_DEST"
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  if omarchy plugin enable smf.hermes --section right >/dev/null 2>&1; then
+    ok "enabled smf.hermes on the right of the bar"
+  else
+    warn "copied but not enabled (run: omarchy plugin enable smf.hermes --section right)"
+  fi
+}
+
+unlink_shell_plugin() {
+  if [[ -d $SHELL_PLUGIN_DEST && ! -L $SHELL_PLUGIN_DEST ]]; then
+    omarchy plugin disable smf.hermes >/dev/null 2>&1 || true
+    rm -rf "$SHELL_PLUGIN_DEST"
+    ok "removed $SHELL_PLUGIN_DEST"
+    omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  else
+    ok "smf.hermes not installed as a copied plugin"
+  fi
+}
+
 # --- Remove ------------------------------------------------------------------
 remove_parts() {
   local all="${1:-}"
@@ -380,8 +437,9 @@ remove_parts() {
     ok "ollama user service disabled (unit file kept)"
     unlink_skills
     unlink_plugin
+    unlink_shell_plugin
   else
-    ok "ollama, skills, and plugin left alone (pass --all to disable ollama and unlink skills/plugin)"
+    ok "ollama, skills, plugin, and shell widget left alone (pass --all to remove them)"
   fi
   echo "Desktop entry left in place: $DESKTOP_ENTRY (delete manually if unwanted)"
 }
@@ -392,6 +450,7 @@ no_ollama=0
 no_autostart=0
 no_skills=0
 no_plugin=0
+no_shell_plugin=0
 json=0
 rm_all=0
 
@@ -402,6 +461,7 @@ for arg in "$@"; do
     --no-autostart) no_autostart=1 ;;
     --no-skills) no_skills=1 ;;
     --no-plugin) no_plugin=1 ;;
+    --no-shell-plugin) no_shell_plugin=1 ;;
     --json) json=1 ;;
     --all) rm_all=1 ;;
     -h|--help)
@@ -424,6 +484,7 @@ case "$action" in
     (( no_autostart )) || install_autostart || rc=1
     (( no_skills )) || install_skills || rc=1
     (( no_plugin )) || install_plugin || rc=1
+    (( no_shell_plugin )) || install_shell_plugin || rc=1
     echo
     (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain. Skills and the Omarchy plugin take effect on the next Hermes session."
     exit "$rc"
@@ -435,6 +496,7 @@ case "$action" in
     (( no_autostart )) || check_autostart || rc=1
     (( no_skills )) || check_skills || rc=1
     (( no_plugin )) || check_plugin || rc=1
+    (( no_shell_plugin )) || check_shell_plugin || rc=1
     if (( json )); then
       printf '{"ollama": %s, "desktop_entry": %s, "autostart": %s}\n' \
         "$(( no_ollama ? 1 : rc == 0 ? 0 : 1 ))" "null" "null" >/dev/null 2>&1 || true

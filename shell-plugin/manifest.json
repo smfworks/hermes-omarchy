@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "smf.hermes",
+  "name": "Hermes",
+  "version": "0.1.0",
+  "author": "SMF Works",
+  "license": "MIT",
+  "description": "Hermes Agent status on the Omarchy bar: desktop running, local usage, launch.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Hermes",
+    "description": "Hermes Agent session status and launch.",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

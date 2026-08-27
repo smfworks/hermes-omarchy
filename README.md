@@ -16,6 +16,7 @@ on any Omarchy machine:
 | Autostart | Adds `o.launch_on_start("hermes")` to `~/.config/hypr/autostart.lua` — the Omarchy-native verb. Resolves the desktop entry via `uwsm-app` at `hyprland.start`. |
 | Skills | Symlinks Omarchy's `omarchy` and `diagnose-crash` skills into `~/.hermes/skills` and every `~/.hermes/profiles/*/skills`. Same contract as `omarchy-provision-user`. |
 | Plugin | Symlinks this repo's `plugin/` into `~/.hermes/plugins/omarchy` (and existing profiles) and runs `hermes plugins enable omarchy`. Allowlisted theme/plugin/bar/menu/screenshot/shell-ping verbs; `--yes` on mutating plugin commands. Hidden off non-Omarchy hosts. |
+| Shell widget | Copies `shell-plugin/` to `~/.config/omarchy/plugins/smf.hermes` (**copy, never symlink** — `omarchy plugin validate` refuses links) and `omarchy plugin enable smf.hermes --section right`. |
 
 ### Usage
 
@@ -26,9 +27,9 @@ bin/hermes-omarchy-setup install     # or: check | remove
 ```
 
 - `install` — apply everything (idempotent; safe to re-run)
-- `install --no-ollama` / `--no-autostart` / `--no-skills` / `--no-plugin` — opt out per part
+- `install --no-ollama` / `--no-autostart` / `--no-skills` / `--no-plugin` / `--no-shell-plugin` — opt out per part
 - `check` — verify current state, exit 0/1 (scriptable health probe)
-- `remove` — revert autostart; `remove --all` also disables the ollama service and unlinks skills/plugin
+- `remove` — revert autostart; `remove --all` also disables ollama and unlinks skills/plugin/shell widget
 
 ### Design notes
 
@@ -55,7 +56,7 @@ Sequenced with the vault's [[hermes-omarchy-integration-plan]]:
 - **W3** — `omarchy-theme-set-hermes` — upstream PR
 - **W4** — `omarchy-agent-usage-hermes` collector — upstream PR
 - **W5** — Hermes plugin wrapping the `omarchy` CLI + shell IPC — done (this installer)
-- **W6** — Omarchy shell widget for Hermes sessions
+- **W6** — Omarchy shell widget `smf.hermes` — done (copied by this installer; also https://github.com/smfworks/smf-hermes)
 
 ## License
 
