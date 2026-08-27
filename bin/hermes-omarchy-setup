@@ -26,8 +26,6 @@ OMARCHY="${OMARCHY_PATH:-/usr/share/omarchy}"
 AUTOSTART_LUA="$HOME/.config/hypr/autostart.lua"
 DESKTOP_ENTRY="$HOME/.local/share/applications/hermes.desktop"
 OLLAMA_UNIT="$HOME/.config/systemd/user/ollama.service"
-AUTOSTART_LINE='o.launch_on_start("hermes desktop")'
-AUTOSTART_LINE_OLD='o.launch_on_start("hermes")'
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PLUGIN_SRC="$REPO_ROOT/plugin"
@@ -50,6 +48,17 @@ find_hermes() {
   fi
   if command -v hermes >/dev/null 2>&1; then
     command -v hermes
+    return 0
+  fi
+  return 1
+}
+
+# Packaged Electron binary. `hermes desktop` tries sudo chrome-sandbox and
+# sys.exit(1) when there is no TTY (Hyprland autostart).
+find_electron() {
+  local candidate="$HERMES_HOME/hermes-agent/apps/desktop/release/linux-unpacked/Hermes"
+  if [[ -x $candidate ]]; then
+    printf '%s' "$candidate"
     return 0
   fi
   return 1
@@ -127,8 +136,8 @@ check_desktop_entry() {
     fail "desktop entry missing: $DESKTOP_ENTRY"
     return 1
   fi
-  if ! grep -q 'venv/bin/hermes desktop\|/bin/hermes desktop' "$DESKTOP_ENTRY"; then
-    warn "desktop entry does not point at a hermes launcher"
+  if ! grep -q 'linux-unpacked/Hermes' "$DESKTOP_ENTRY"; then
+    warn "desktop entry does not point at the packaged Electron binary"
     return 1
   fi
   if command -v desktop-file-validate >/dev/null 2>&1; then
@@ -139,9 +148,9 @@ check_desktop_entry() {
 
 install_desktop_entry() {
   step "Hermes desktop entry"
-  local hermes_bin
-  hermes_bin="$(find_hermes)" || {
-    warn "hermes launcher not found (looked in $HERMES_HOME/hermes-agent/venv/bin and PATH) — skipping"
+  local electron
+  electron="$(find_electron)" || {
+    warn "packaged Hermes Electron binary not found — skipping desktop entry"
     return 0
   }
 
@@ -155,27 +164,42 @@ Type=Application
 Name=Hermes
 GenericName=Hermes Desktop
 Comment=Launch Hermes Desktop
-Exec=$hermes_bin desktop
+Exec=$electron --no-sandbox
 Icon=$icon
 Terminal=false
 Categories=Utility;
 StartupNotify=true
 StartupWMClass=Hermes
 EOF
+  chmod 755 "$DESKTOP_ENTRY"
 
   if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$DESKTOP_ENTRY" || { fail "generated entry failed validation"; return 1; }
   fi
-  ok "desktop entry written (Exec=$hermes_bin desktop)"
+  ok "desktop entry written (Exec=$electron --no-sandbox)"
 }
 
 # --- Hyprland autostart ------------------------------------------------------
+autostart_line() {
+  local electron
+  electron="$(find_electron)" || return 1
+  printf 'o.launch_on_start("%s --no-sandbox")' "$electron"
+}
+
+strip_stale_autostart() {
+  [[ -f $AUTOSTART_LUA ]] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  grep -vE -- 'o\.launch_on_start\("hermes( desktop)?"\)|o\.launch_on_start\(".*/linux-unpacked/Hermes' "$AUTOSTART_LUA" >"$tmp" || true
+  mv "$tmp" "$AUTOSTART_LUA"
+}
+
 check_autostart() {
   if [[ ! -f $AUTOSTART_LUA ]]; then
     fail "autostart config missing: $AUTOSTART_LUA"
     return 1
   fi
-  if ! grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
+  if ! grep -q 'linux-unpacked/Hermes --no-sandbox' "$AUTOSTART_LUA"; then
     fail "autostart line missing from $AUTOSTART_LUA"
     return 1
   fi
@@ -188,22 +212,20 @@ install_autostart() {
     warn "Omarchy not detected (no \$OMARCHY_PATH, no /usr/share/omarchy) — skipping autostart"
     return 0
   fi
+  local line
+  line="$(autostart_line)" || {
+    warn "packaged Hermes Electron binary not found — skipping autostart"
+    return 0
+  }
   mkdir -p "$(dirname "$AUTOSTART_LUA")"
   touch "$AUTOSTART_LUA"
-
-  if grep -qF -- "$AUTOSTART_LINE_OLD" "$AUTOSTART_LUA"; then
-    local tmp
-    tmp="$(mktemp)"
-    grep -vF -- "$AUTOSTART_LINE_OLD" "$AUTOSTART_LUA" >"$tmp" || true
-    mv "$tmp" "$AUTOSTART_LUA"
-    ok "removed stale o.launch_on_start(\"hermes\") (CLI, exits with no TTY)"
-  fi
-  if grep -qF -- "$AUTOSTART_LINE" "$AUTOSTART_LUA"; then
+  strip_stale_autostart
+  if grep -qF -- "$line" "$AUTOSTART_LUA"; then
     ok "autostart line already present"
     return 0
   fi
-  printf '%s\n' "$AUTOSTART_LINE" >>"$AUTOSTART_LUA"
-  ok "added o.launch_on_start(\"hermes desktop\") — fires on next Hyprland session"
+  printf '%s\n' "$line" >>"$AUTOSTART_LUA"
+  ok "added $line — fires on next Hyprland session"
 }
 
 # --- Omarchy agent skills ----------------------------------------------------
@@ -431,10 +453,10 @@ remove_parts() {
   local all="${1:-}"
   step "Remove"
 
-  if [[ -f $AUTOSTART_LUA ]] && grep -qE -- 'o\.launch_on_start\("hermes( desktop)?"\)' "$AUTOSTART_LUA"; then
+  if [[ -f $AUTOSTART_LUA ]] && grep -qE -- 'o\.launch_on_start\(".*(hermes|Hermes)' "$AUTOSTART_LUA"; then
     local tmp
     tmp="$(mktemp)"
-    grep -vE -- 'o\.launch_on_start\("hermes( desktop)?"\)' "$AUTOSTART_LUA" >"$tmp" || true
+    grep -vE -- 'o\.launch_on_start\(".*(hermes|Hermes)' "$AUTOSTART_LUA" >"$tmp" || true
     mv "$tmp" "$AUTOSTART_LUA"
     ok "removed autostart line"
   else
