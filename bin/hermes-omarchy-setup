@@ -7,11 +7,12 @@
 #   2. hermes.desktop entry pointing at the self-contained venv launcher
 #   3. Hermes desktop autostart via Omarchy's o.launch_on_start()
 #   4. Omarchy agent skills (omarchy, diagnose-crash) symlinked into Hermes
+#   5. Hermes plugin wrapping allowlisted `omarchy` verbs
 #
 # Usage:
-#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills]
+#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin]
 #   hermes-omarchy-setup check    [--json]
-#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama + unlinks skills
+#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama + unlinks skills/plugin
 #
 # Exits non-zero when "check" finds problems or "install" fails a step.
 
@@ -24,6 +25,9 @@ AUTOSTART_LUA="$HOME/.config/hypr/autostart.lua"
 DESKTOP_ENTRY="$HOME/.local/share/applications/hermes.desktop"
 OLLAMA_UNIT="$HOME/.config/systemd/user/ollama.service"
 AUTOSTART_LINE='o.launch_on_start("hermes")'
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+PLUGIN_SRC="$REPO_ROOT/plugin"
 
 # --- Output helpers ----------------------------------------------------------
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -275,6 +279,87 @@ unlink_skills() {
   done < <(hermes_skill_dests)
 }
 
+hermes_plugin_homes() {
+  printf '%s\n' "$HOME/.hermes"
+  local profile
+  if [[ -d $HOME/.hermes/profiles ]]; then
+    for profile in "$HOME"/.hermes/profiles/*/; do
+      [[ -d $profile ]] || continue
+      printf '%s\n' "${profile%/}"
+    done
+  fi
+}
+
+check_plugin() {
+  local home dest
+  if [[ ! -f $PLUGIN_SRC/plugin.yaml ]]; then
+    fail "plugin source missing: $PLUGIN_SRC"
+    return 1
+  fi
+  local rc=0
+  local homes=()
+  mapfile -t homes < <(hermes_plugin_homes)
+  for home in "${homes[@]}"; do
+    dest="$home/plugins/omarchy"
+    if [[ ! -e $dest ]]; then
+      fail "plugin missing: $dest"
+      rc=1
+      continue
+    fi
+    if [[ -L $dest && $(readlink "$dest") != "$PLUGIN_SRC" ]]; then
+      fail "plugin $dest does not point at $PLUGIN_SRC"
+      rc=1
+    fi
+  done
+  (( rc == 0 )) && ok "Omarchy plugin linked into Hermes plugin dirs"
+  return "$rc"
+}
+
+install_plugin() {
+  step "Hermes Omarchy plugin"
+  local home dest hermes_bin
+  if [[ ! -f $PLUGIN_SRC/plugin.yaml ]]; then
+    warn "plugin source missing: $PLUGIN_SRC — skipping"
+    return 0
+  fi
+  hermes_bin=$(find_hermes || true)
+  local homes=()
+  mapfile -t homes < <(hermes_plugin_homes)
+  for home in "${homes[@]}"; do
+    mkdir -p "$home/plugins"
+    dest="$home/plugins/omarchy"
+    ln -sfn "$PLUGIN_SRC" "$dest"
+    ok "linked $dest"
+    if [[ -n $hermes_bin ]]; then
+      # --no-allow-tool-override skips the TTY prompt and never grants
+      # built-in tool replacement. Redirect stdin so a prompt cannot eat
+      # the remaining home list.
+      if HERMES_HOME="$home" "$hermes_bin" plugins enable omarchy --no-allow-tool-override </dev/null >/dev/null 2>&1; then
+        ok "enabled omarchy plugin for $home"
+      else
+        warn "could not enable plugin for $home (run: HERMES_HOME=$home hermes plugins enable omarchy --no-allow-tool-override)"
+      fi
+    fi
+  done
+}
+
+unlink_plugin() {
+  local home dest hermes_bin
+  hermes_bin=$(find_hermes || true)
+  local homes=()
+  mapfile -t homes < <(hermes_plugin_homes)
+  for home in "${homes[@]}"; do
+    dest="$home/plugins/omarchy"
+    if [[ -L $dest && $(readlink "$dest") == "$PLUGIN_SRC" ]]; then
+      rm -f "$dest"
+      ok "unlinked $dest"
+    fi
+    if [[ -n $hermes_bin ]]; then
+      HERMES_HOME="$home" "$hermes_bin" plugins disable omarchy </dev/null >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # --- Remove ------------------------------------------------------------------
 remove_parts() {
   local all="${1:-}"
@@ -294,8 +379,9 @@ remove_parts() {
     systemctl --user disable --now ollama >/dev/null 2>&1 || true
     ok "ollama user service disabled (unit file kept)"
     unlink_skills
+    unlink_plugin
   else
-    ok "ollama and skills left alone (pass --all to disable ollama and unlink skills)"
+    ok "ollama, skills, and plugin left alone (pass --all to disable ollama and unlink skills/plugin)"
   fi
   echo "Desktop entry left in place: $DESKTOP_ENTRY (delete manually if unwanted)"
 }
@@ -305,6 +391,7 @@ action="install"
 no_ollama=0
 no_autostart=0
 no_skills=0
+no_plugin=0
 json=0
 rm_all=0
 
@@ -314,6 +401,7 @@ for arg in "$@"; do
     --no-ollama) no_ollama=1 ;;
     --no-autostart) no_autostart=1 ;;
     --no-skills) no_skills=1 ;;
+    --no-plugin) no_plugin=1 ;;
     --json) json=1 ;;
     --all) rm_all=1 ;;
     -h|--help)
@@ -335,8 +423,9 @@ case "$action" in
     install_desktop_entry || rc=1
     (( no_autostart )) || install_autostart || rc=1
     (( no_skills )) || install_skills || rc=1
+    (( no_plugin )) || install_plugin || rc=1
     echo
-    (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain. Skills take effect on the next Hermes session."
+    (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain. Skills and the Omarchy plugin take effect on the next Hermes session."
     exit "$rc"
     ;;
   check)
@@ -345,6 +434,7 @@ case "$action" in
     check_desktop_entry || rc=1
     (( no_autostart )) || check_autostart || rc=1
     (( no_skills )) || check_skills || rc=1
+    (( no_plugin )) || check_plugin || rc=1
     if (( json )); then
       printf '{"ollama": %s, "desktop_entry": %s, "autostart": %s}\n' \
         "$(( no_ollama ? 1 : rc == 0 ? 0 : 1 ))" "null" "null" >/dev/null 2>&1 || true

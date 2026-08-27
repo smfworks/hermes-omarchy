@@ -1,0 +1,8 @@
+name: omarchy
+version: 0.1.0
+description: "Omarchy desktop verbs for Hermes — theme, plugins, menu, screenshot. Tools gate on OMARCHY_PATH / omarchy CLI. Mutating plugin commands always pass --yes."
+author: SMF Works
+license: MIT
+kind: tool
+provides_tools:
+  - omarchy
