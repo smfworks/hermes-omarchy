@@ -49,8 +49,8 @@ Tested on Omarchy (Arch, Hyprland) with Hermes git-install v0.20.6, Ollama
 
 Sequenced with the vault's [[hermes-omarchy-integration-plan]]:
 
-- **W1** — Omarchy agent skill symlinked for Hermes (`~/.hermes/skills`) — **done** (this installer; upstream Omarchy PR pending)
-- **W2** — `hermes` as an `omarchy default agent` option (upstream PR)
+- **W1** — Omarchy agent skill symlinked for Hermes — done (installer + upstream PR)
+- **W2** — `hermes` as an `omarchy default agent` option — upstream PR
 - **W3** — `omarchy-theme-set-hermes` (theme → Hermes skin sync)
 - **W4** — `omarchy-agent-usage-hermes` collector (agents bar panel)
 - **W5** — Hermes plugin wrapping the `omarchy` CLI + shell IPC
