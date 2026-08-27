@@ -52,7 +52,7 @@ Sequenced with the vault's [[hermes-omarchy-integration-plan]]:
 - **W1** — Omarchy agent skill symlinked for Hermes — done (installer + upstream PR)
 - **W2** — `hermes` as an `omarchy default agent` option — upstream PR
 - **W3** — `omarchy-theme-set-hermes` — upstream PR
-- **W4** — `omarchy-agent-usage-hermes` collector (agents bar panel)
+- **W4** — `omarchy-agent-usage-hermes` collector — upstream PR
 - **W5** — Hermes plugin wrapping the `omarchy` CLI + shell IPC
 - **W6** — Omarchy shell widget for Hermes sessions
 
