@@ -1,23 +1,24 @@
 # smf.hermes
 
-Third-party Omarchy shell plugin: Hermes Agent on the bar.
+Optional Omarchy bar **launch/status** stub. Not the usage meter.
 
-## Contract
-
-- `schemaVersion: 1`
-- id `smf.hermes` (not `omarchy.*` — that namespace is reserved)
-- kind `bar-widget`, entry `BarWidget.qml`
-- No symlinks in this folder (`omarchy plugin validate` refuses them)
-
-## Install
-
-From this toolkit (copies files; does not symlink):
+For tokens / local vs remote gateway, install Mustafa's widget instead:
 
 ```bash
-omarchy plugin add https://github.com/smfworks/smf-hermes.git --enable --yes
-# or via the toolkit (copies files; does not symlink):
-bin/hermes-omarchy-setup install --no-ollama --no-autostart --no-skills --no-plugin
+omarchy plugin add https://github.com/okurmustafa/omarchy-hermes.git --enable --yes
+```
+
+Do not enable this stub next to that plugin — two Hermes pills.
+
+## This stub
+
+- id `smf.hermes` (not `omarchy.*`)
+- kind `bar-widget`
+- No symlinks (`omarchy plugin validate` refuses them)
+
+```bash
+# toolkit opt-in only
+bin/hermes-omarchy-setup install --shell-plugin
 ```
 
 Left click: panel. Right click: launch Hermes desktop. Middle click: refresh.
-Panel: Enter/L launch, R refresh `omarchy agent usage-update hermes` (no-op until W4 merges).

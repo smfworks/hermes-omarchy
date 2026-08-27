@@ -8,12 +8,13 @@
 #   3. Hermes desktop autostart via Omarchy's o.launch_on_start()
 #   4. Omarchy agent skills (omarchy, diagnose-crash) symlinked into Hermes
 #   5. Hermes plugin wrapping allowlisted `omarchy` verbs
-#   6. Omarchy shell widget smf.hermes (copied, never symlinked)
+#   6. Optional: copy smf.hermes bar stub (--shell-plugin). Default bar meter is
+#      okurmustafa/omarchy-hermes, not this stub.
 #
 # Usage:
-#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin] [--no-shell-plugin]
+#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin] [--shell-plugin]
 #   hermes-omarchy-setup check    [--json]
-#   hermes-omarchy-setup remove   [--all]     # revert autostart; --all also disables ollama + unlinks skills/plugin/shell widget
+#   hermes-omarchy-setup remove   [--all]
 #
 # Exits non-zero when "check" finds problems or "install" fails a step.
 
@@ -450,7 +451,7 @@ no_ollama=0
 no_autostart=0
 no_skills=0
 no_plugin=0
-no_shell_plugin=0
+no_shell_plugin=1
 json=0
 rm_all=0
 
@@ -461,6 +462,7 @@ for arg in "$@"; do
     --no-autostart) no_autostart=1 ;;
     --no-skills) no_skills=1 ;;
     --no-plugin) no_plugin=1 ;;
+    --shell-plugin) no_shell_plugin=0 ;;
     --no-shell-plugin) no_shell_plugin=1 ;;
     --json) json=1 ;;
     --all) rm_all=1 ;;
@@ -496,7 +498,9 @@ case "$action" in
     (( no_autostart )) || check_autostart || rc=1
     (( no_skills )) || check_skills || rc=1
     (( no_plugin )) || check_plugin || rc=1
-    (( no_shell_plugin )) || check_shell_plugin || rc=1
+    if (( no_shell_plugin == 0 )) || [[ -f $SHELL_PLUGIN_DEST/manifest.json ]]; then
+      check_shell_plugin || rc=1
+    fi
     if (( json )); then
       printf '{"ollama": %s, "desktop_entry": %s, "autostart": %s}\n' \
         "$(( no_ollama ? 1 : rc == 0 ? 0 : 1 ))" "null" "null" >/dev/null 2>&1 || true
