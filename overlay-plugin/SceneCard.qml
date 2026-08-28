@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
@@ -15,6 +16,7 @@ Item {
   property string title: ""
   property string subtitle: ""
   property int duration: 5000
+  readonly property string scenePath: Quickshell.env("HOME") + "/.local/state/omarchy/hermes-demo/scene.json"
 
   readonly property int pad: Style.space(20)
   readonly property int gap: Style.space(6)
@@ -23,6 +25,13 @@ Item {
   function applyPayload(payloadJson) {
     var payload = ({})
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
+    if (!payload || (payload.title === undefined && payload.duration === undefined)) {
+      try {
+        var disk = sceneFile.text()
+        if (disk && disk.length)
+          payload = JSON.parse(disk)
+      } catch (e2) {}
+    }
     root.kicker = payload.kicker !== undefined ? String(payload.kicker) : "HERMES"
     root.title = payload.title !== undefined ? String(payload.title) : ""
     root.subtitle = payload.subtitle !== undefined ? String(payload.subtitle) : ""
@@ -37,10 +46,11 @@ Item {
     if (root.title === "" && root.subtitle === "")
       root.title = "Hermes"
     root.opened = true
+    hideTimer.stop()
+    hideTimer.interval = Math.max(0, root.duration)
     if (root.duration > 0)
-      hideTimer.restart()
-    else
-      hideTimer.stop()
+      hideTimer.start()
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   function close() {
@@ -61,10 +71,17 @@ Item {
       root.open("{}")
   }
 
+  FileView {
+    id: sceneFile
+    path: root.scenePath
+    watchChanges: true
+    printErrors: false
+  }
+
   Timer {
     id: hideTimer
     interval: Math.max(0, root.duration)
-    onTriggered: root.dismiss()
+    onTriggered: root.close()
   }
 
   PanelWindow {
@@ -76,7 +93,8 @@ Item {
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
-    mask: Region {}
+    // Only the card takes clicks; the rest of the screen stays Hermes.
+    mask: Region { item: card }
 
     BorderSurface {
       id: card
@@ -89,6 +107,26 @@ Item {
       borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
       radius: Style.cornerRadius
       opacity: root.opened ? 1 : 0
+
+      MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.dismiss()
+      }
+
+      Item {
+        id: keyCatcher
+        anchors.fill: parent
+        focus: true
+        Keys.priority: Keys.BeforeItem
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Escape || event.key === Qt.Key_W && (event.modifiers & Qt.MetaModifier)) {
+            root.dismiss()
+            event.accepted = true
+          }
+        }
+      }
 
       Column {
         id: inner

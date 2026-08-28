@@ -15,18 +15,18 @@ bin/hermes-omarchy-scene install
 
 ```bash
 bin/hermes-omarchy-scene show "Installing Tailscale" --subtitle "omarchy install service tailscale"
-bin/hermes-omarchy-scene show "Talking to the machine" --duration 0
 bin/hermes-omarchy-scene hide
 ```
 
-Or:
+Default duration is 5s. Dismiss anytime: **click the card**, **Escape**, or **Super+W**.
+While the card is up, Super+W does **not** close Hermes (it is rebound only for the life of the layer).
+
+`--duration 0` holds until dismiss. Do not leave it up unattended.
 
 ```bash
 omarchy-shell shell summon smf.scene-card '{"title":"Installing Tailscale","subtitle":"official verb","duration":5000}'
 omarchy-shell shell hide smf.scene-card
 ```
-
-Escape is not captured (clicks pass through, like OSD). Duration 0 keeps it up until `hide`.
 
 ## Remove
 

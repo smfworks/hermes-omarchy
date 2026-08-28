@@ -6,14 +6,19 @@
 #   show [--kicker TEXT] [--subtitle TEXT] [--duration MS] <title>
 #   hide
 #
-# Overlay plugin smf.scene-card. Not a bar widget. Clicks pass through.
+# Overlay plugin smf.scene-card. Not a bar widget.
+# Click the card, Escape, or Super+W to dismiss (Super+W does not close Hermes).
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 SRC="$REPO_ROOT/overlay-plugin"
+SRC_LUA="$REPO_ROOT/hypr/hermes-scene.lua"
 DEST="$HOME/.config/omarchy/plugins/smf.scene-card"
+DEST_LUA="$HOME/.config/hypr/hermes-scene.lua"
+HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
+REQUIRE='require("hypr.hermes-scene")'
 ID="smf.scene-card"
 
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -43,11 +48,39 @@ install_plugin() {
   else
     warn "copied but not enabled (run: omarchy plugin enable $ID)"
   fi
+  if [[ -f $SRC_LUA ]]; then
+    mkdir -p "$(dirname "$DEST_LUA")"
+    cp -f "$SRC_LUA" "$DEST_LUA"
+    ok "wrote $DEST_LUA"
+    if [[ -f $HYPRLAND_LUA ]] && ! grep -qF -- "$REQUIRE" "$HYPRLAND_LUA"; then
+      if grep -q 'require("hypr.hermes-exclusive")' "$HYPRLAND_LUA"; then
+        local tmp
+        tmp="$(mktemp)"
+        awk -v line="$REQUIRE" '
+          { print }
+          $0 ~ /require\("hypr.hermes-exclusive"\)/ && !seen { print line; seen=1 }
+        ' "$HYPRLAND_LUA" >"$tmp"
+        mv "$tmp" "$HYPRLAND_LUA"
+      else
+        printf '\n%s\n' "$REQUIRE" >>"$HYPRLAND_LUA"
+      fi
+      ok "added $REQUIRE"
+    fi
+    hyprctl reload >/dev/null 2>&1 || true
+  fi
 }
 
 remove_plugin() {
   omarchy plugin disable "$ID" >/dev/null 2>&1 || true
   omarchy-shell -q shell hide "$ID" >/dev/null 2>&1 || true
+  if [[ -f $HYPRLAND_LUA ]] && grep -qF -- "$REQUIRE" "$HYPRLAND_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    grep -vF -- "$REQUIRE" "$HYPRLAND_LUA" >"$tmp" || true
+    mv "$tmp" "$HYPRLAND_LUA"
+    ok "removed require from $HYPRLAND_LUA"
+  fi
+  rm -f "$DEST_LUA"
   if [[ -d $DEST && ! -L $DEST ]]; then
     rm -rf "$DEST"
     ok "removed $DEST"
@@ -91,28 +124,34 @@ show_card() {
   local kicker="HERMES"
   local subtitle=""
   local duration="5000"
-  local title=""
+  local extras=()
   while (( $# > 0 )); do
     case "$1" in
       --kicker) kicker="${2:-}"; shift 2 ;;
       --subtitle) subtitle="${2:-}"; shift 2 ;;
       --duration) duration="${2:-}"; shift 2 ;;
       -h|--help) usage; return 0 ;;
-      --) shift; break ;;
+      --) shift; extras+=("$@"); break ;;
       -*) fail "unknown option: $1"; return 2 ;;
-      *) title="$1"; shift; break ;;
+      *) extras+=("$1"); shift ;;
     esac
   done
-  if [[ -n ${1:-} && -z $title ]]; then
-    title="$1"
-    shift
-  fi
+  local title="${extras[*]}"
   [[ -n $title ]] || { fail "title required"; return 2; }
+  if [[ $duration == 0 ]]; then
+    warn "duration 0 stays until click / Escape / Super+W / hide — Super+W will not close Hermes"
+  fi
   if [[ ! -f $DEST/manifest.json ]]; then
     install_plugin
   fi
+  mkdir -p "$(dirname "$HOME/.local/state/omarchy/hermes-demo/scene.json")"
+  python3 -c 'import json,sys
+p={"kicker":sys.argv[1],"title":sys.argv[2],"subtitle":sys.argv[3],"duration":int(sys.argv[4])}
+open(sys.argv[5],"w").write(json.dumps(p)+chr(10))
+print(json.dumps(p, separators=(",", ":")))
+' "$kicker" "$title" "$subtitle" "$duration" "$HOME/.local/state/omarchy/hermes-demo/scene.json" >/tmp/hermes-scene-payload.json
   local payload
-  payload=$(python3 -c 'import json,sys; print(json.dumps({"kicker":sys.argv[1],"title":sys.argv[2],"subtitle":sys.argv[3],"duration":int(sys.argv[4])}))' "$kicker" "$title" "$subtitle" "$duration")
+  payload=$(cat /tmp/hermes-scene-payload.json)
   omarchy-shell shell summon "$ID" "$payload"
 }
 
