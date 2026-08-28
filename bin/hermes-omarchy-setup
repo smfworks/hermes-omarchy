@@ -10,9 +10,11 @@
 #   5. Hermes plugin wrapping allowlisted `omarchy` verbs
 #   6. Optional: copy smf.hermes bar stub (--shell-plugin). Default bar meter is
 #      okurmustafa/omarchy-hermes, not this stub.
+#   7. Hermes exclusive workspace: class Hermes stays on workspace 1 (full tile).
+#      Other apps that would open there go to workspace 2+. Dialogs / PiP stay.
 #
 # Usage:
-#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin] [--shell-plugin]
+#   hermes-omarchy-setup install [--no-ollama] [--no-autostart] [--no-skills] [--no-plugin] [--shell-plugin] [--no-exclusive-ws]
 #   hermes-omarchy-setup check    [--json]
 #   hermes-omarchy-setup remove   [--all]
 #
@@ -24,12 +26,16 @@ set -euo pipefail
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 OMARCHY="${OMARCHY_PATH:-/usr/share/omarchy}"
 AUTOSTART_LUA="$HOME/.config/hypr/autostart.lua"
+HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
+EXCLUSIVE_LUA="$HOME/.config/hypr/hermes-exclusive.lua"
+EXCLUSIVE_REQUIRE='require("hypr.hermes-exclusive")'
 DESKTOP_ENTRY="$HOME/.local/share/applications/hermes.desktop"
 OLLAMA_UNIT="$HOME/.config/systemd/user/ollama.service"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PLUGIN_SRC="$REPO_ROOT/plugin"
 SHELL_PLUGIN_SRC="$REPO_ROOT/shell-plugin"
+EXCLUSIVE_SRC="$REPO_ROOT/hypr/hermes-exclusive.lua"
 
 # --- Output helpers ----------------------------------------------------------
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -226,6 +232,78 @@ install_autostart() {
   fi
   printf '%s\n' "$line" >>"$AUTOSTART_LUA"
   ok "added $line — fires on next Hyprland session"
+}
+
+# --- Hermes exclusive workspace ---------------------------------------------
+# Workspace 1 is Hermes-only. Other mapped apps go to 2+. User Hyprland config
+# only — never /usr/share/omarchy.
+
+check_exclusive_ws() {
+  if [[ ! -f $EXCLUSIVE_SRC ]]; then
+    fail "exclusive-ws source missing: $EXCLUSIVE_SRC"
+    return 1
+  fi
+  if [[ ! -f $EXCLUSIVE_LUA ]]; then
+    fail "exclusive-ws config missing: $EXCLUSIVE_LUA"
+    return 1
+  fi
+  if [[ ! -f $HYPRLAND_LUA ]] || ! grep -qF -- "$EXCLUSIVE_REQUIRE" "$HYPRLAND_LUA"; then
+    fail "exclusive-ws require missing from $HYPRLAND_LUA"
+    return 1
+  fi
+  ok "Hermes exclusive workspace wired ($EXCLUSIVE_LUA)"
+}
+
+install_exclusive_ws() {
+  step "Hermes exclusive workspace"
+  if ! is_omarchy; then
+    warn "Omarchy not detected — skipping exclusive workspace"
+    return 0
+  fi
+  if [[ ! -f $EXCLUSIVE_SRC ]]; then
+    warn "exclusive-ws source missing: $EXCLUSIVE_SRC — skipping"
+    return 0
+  fi
+  mkdir -p "$(dirname "$EXCLUSIVE_LUA")"
+  cp -f "$EXCLUSIVE_SRC" "$EXCLUSIVE_LUA"
+  ok "wrote $EXCLUSIVE_LUA"
+  mkdir -p "$(dirname "$HYPRLAND_LUA")"
+  if [[ ! -f $HYPRLAND_LUA ]]; then
+    warn "no $HYPRLAND_LUA — not adding require"
+    return 0
+  fi
+  if grep -qF -- "$EXCLUSIVE_REQUIRE" "$HYPRLAND_LUA"; then
+    ok "require already present"
+    return 0
+  fi
+  if grep -q 'require("hypr.autostart")' "$HYPRLAND_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v line="$EXCLUSIVE_REQUIRE" '
+      { print }
+      $0 ~ /require\("hypr.autostart"\)/ && !seen { print line; seen=1 }
+    ' "$HYPRLAND_LUA" >"$tmp"
+    mv "$tmp" "$HYPRLAND_LUA"
+  else
+    printf '\n%s\n' "$EXCLUSIVE_REQUIRE" >>"$HYPRLAND_LUA"
+  fi
+  ok "added $EXCLUSIVE_REQUIRE"
+}
+
+unlink_exclusive_ws() {
+  if [[ -f $HYPRLAND_LUA ]] && grep -qF -- "$EXCLUSIVE_REQUIRE" "$HYPRLAND_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    grep -vF -- "$EXCLUSIVE_REQUIRE" "$HYPRLAND_LUA" >"$tmp" || true
+    mv "$tmp" "$HYPRLAND_LUA"
+    ok "removed require from $HYPRLAND_LUA"
+  else
+    ok "exclusive-ws require not present"
+  fi
+  if [[ -f $EXCLUSIVE_LUA ]]; then
+    rm -f "$EXCLUSIVE_LUA"
+    ok "removed $EXCLUSIVE_LUA"
+  fi
 }
 
 # --- Omarchy agent skills ----------------------------------------------------
@@ -469,7 +547,9 @@ remove_parts() {
     unlink_skills
     unlink_plugin
     unlink_shell_plugin
+    unlink_exclusive_ws
   else
+    unlink_exclusive_ws
     ok "ollama, skills, plugin, and shell widget left alone (pass --all to remove them)"
   fi
   echo "Desktop entry left in place: $DESKTOP_ENTRY (delete manually if unwanted)"
@@ -482,6 +562,7 @@ no_autostart=0
 no_skills=0
 no_plugin=0
 no_shell_plugin=1
+no_exclusive_ws=0
 json=0
 rm_all=0
 
@@ -494,6 +575,7 @@ for arg in "$@"; do
     --no-plugin) no_plugin=1 ;;
     --shell-plugin) no_shell_plugin=0 ;;
     --no-shell-plugin) no_shell_plugin=1 ;;
+    --no-exclusive-ws) no_exclusive_ws=1 ;;
     --json) json=1 ;;
     --all) rm_all=1 ;;
     -h|--help)
@@ -517,6 +599,7 @@ case "$action" in
     (( no_skills )) || install_skills || rc=1
     (( no_plugin )) || install_plugin || rc=1
     (( no_shell_plugin )) || install_shell_plugin || rc=1
+    (( no_exclusive_ws )) || install_exclusive_ws || rc=1
     echo
     (( rc )) && fail "install finished with errors" || echo "All done. Re-login (or reboot) to confirm the full boot chain. Skills and the Omarchy plugin take effect on the next Hermes session."
     exit "$rc"
@@ -528,6 +611,7 @@ case "$action" in
     (( no_autostart )) || check_autostart || rc=1
     (( no_skills )) || check_skills || rc=1
     (( no_plugin )) || check_plugin || rc=1
+    (( no_exclusive_ws )) || check_exclusive_ws || rc=1
     if (( no_shell_plugin == 0 )) || [[ -f $SHELL_PLUGIN_DEST/manifest.json ]]; then
       check_shell_plugin || rc=1
     fi

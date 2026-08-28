@@ -16,6 +16,7 @@ on any Omarchy machine:
 | Autostart | `o.launch_on_start("<unpacked Hermes> --no-sandbox")`. Not `hermes` (CLI) and not `hermes desktop` (sudo chrome-sandbox, no TTY → exit 1). |
 | Skills | Symlinks Omarchy's `omarchy` and `diagnose-crash` skills into `~/.hermes/skills` and every `~/.hermes/profiles/*/skills`. Same contract as `omarchy-provision-user`. |
 | Plugin | Symlinks this repo's `plugin/` into `~/.hermes/plugins/omarchy` (and existing profiles) and runs `hermes plugins enable omarchy`. Allowlisted theme/plugin/bar/menu/screenshot/shell-ping verbs; `--yes` on mutating plugin commands. Hidden off non-Omarchy hosts. |
+| Exclusive WS | `~/.config/hypr/hermes-exclusive.lua`: class `Hermes` stays on workspace 1 (full tile). Other apps that would open there go to workspace 2+. Dialogs, PiP, webcam, screensaver stay. `--no-exclusive-ws` to skip. |
 
 Bar **usage** is not this repo. Use Mustafa's widget (local `state.db` + remote gateway):
 
@@ -36,8 +37,9 @@ bin/hermes-omarchy-setup install     # or: check | remove
 - `install` — apply everything (idempotent; safe to re-run)
 - `install --no-ollama` / `--no-autostart` / `--no-skills` / `--no-plugin` — opt out per part
 - `install --shell-plugin` — opt in the `smf.hermes` launch stub (off by default)
+- `install --no-exclusive-ws` — do not pin Hermes to workspace 1
 - `check` — verify current state, exit 0/1 (scriptable health probe)
-- `remove` — revert autostart; `remove --all` also disables ollama and unlinks skills/plugin/shell widget
+- `remove` — revert autostart and exclusive-ws; `remove --all` also disables ollama and unlinks skills/plugin/shell widget
 
 ### Design notes
 
