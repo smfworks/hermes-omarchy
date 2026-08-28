@@ -4,7 +4,8 @@
 #
 # Idempotent. Safe to re-run. Parts:
 #   1. Ollama as a systemd USER service (enabled at login, port 11434)
-#   2. hermes.desktop entry pointing at the self-contained venv launcher
+#   2. hermes.desktop → packaged Electron --no-sandbox, plus a user systemd
+#      path unit that restores it when `hermes desktop` rewrites the file
 #   3. Hermes desktop autostart via Omarchy's o.launch_on_start()
 #   4. Omarchy agent skills (omarchy, diagnose-crash) symlinked into Hermes
 #   5. Hermes plugin wrapping allowlisted `omarchy` verbs
@@ -62,11 +63,16 @@ find_hermes() {
 # Packaged Electron binary. `hermes desktop` tries sudo chrome-sandbox and
 # sys.exit(1) when there is no TTY (Hyprland autostart).
 find_electron() {
-  local candidate="$HERMES_HOME/hermes-agent/apps/desktop/release/linux-unpacked/Hermes"
-  if [[ -x $candidate ]]; then
-    printf '%s' "$candidate"
-    return 0
-  fi
+  local candidate
+  for candidate in \
+    "${HERMES_HOME:-$HOME/.hermes}/hermes-agent/apps/desktop/release/linux-unpacked/Hermes" \
+    "$HOME/.hermes/hermes-agent/apps/desktop/release/linux-unpacked/Hermes"
+  do
+    if [[ -x $candidate ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -150,6 +156,7 @@ check_desktop_entry() {
     desktop-file-validate "$DESKTOP_ENTRY" || { fail "desktop entry invalid"; return 1; }
   fi
   ok "desktop entry valid: $DESKTOP_ENTRY"
+  check_desktop_guard
 }
 
 install_desktop_entry() {
@@ -183,6 +190,53 @@ EOF
     desktop-file-validate "$DESKTOP_ENTRY" || { fail "generated entry failed validation"; return 1; }
   fi
   ok "desktop entry written (Exec=$electron --no-sandbox)"
+  install_desktop_guard
+}
+
+# --- Desktop entry guard -----------------------------------------------------
+# `hermes desktop` rewrites hermes.desktop to mise python. Restore on change.
+
+GUARD_BIN="$HOME/.local/bin/hermes-desktop-entry-guard"
+GUARD_UNIT_DIR="$HOME/.config/systemd/user"
+
+install_desktop_guard() {
+  mkdir -p "$(dirname "$GUARD_BIN")" "$GUARD_UNIT_DIR"
+  cp -f "$REPO_ROOT/bin/hermes-desktop-entry-guard" "$GUARD_BIN"
+  chmod 755 "$GUARD_BIN"
+  cp -f "$REPO_ROOT/systemd/hermes-desktop-entry-guard.service" "$GUARD_UNIT_DIR/"
+  cp -f "$REPO_ROOT/systemd/hermes-desktop-entry-guard.path" "$GUARD_UNIT_DIR/"
+  systemctl --user daemon-reload
+  if systemctl --user enable --now hermes-desktop-entry-guard.path; then
+    ok "desktop-entry guard enabled (restores Exec after hermes desktop rewrite)"
+  else
+    warn "could not enable hermes-desktop-entry-guard.path"
+    return 1
+  fi
+}
+
+check_desktop_guard() {
+  if [[ ! -x $GUARD_BIN ]]; then
+    fail "guard missing: $GUARD_BIN"
+    return 1
+  fi
+  if ! systemctl --user is-enabled hermes-desktop-entry-guard.path >/dev/null 2>&1; then
+    fail "hermes-desktop-entry-guard.path not enabled"
+    return 1
+  fi
+  if ! systemctl --user is-active hermes-desktop-entry-guard.path >/dev/null 2>&1; then
+    fail "hermes-desktop-entry-guard.path not active"
+    return 1
+  fi
+  ok "desktop-entry guard watching hermes.desktop"
+}
+
+unlink_desktop_guard() {
+  systemctl --user disable --now hermes-desktop-entry-guard.path >/dev/null 2>&1 || true
+  rm -f "$GUARD_UNIT_DIR/hermes-desktop-entry-guard.path" \
+    "$GUARD_UNIT_DIR/hermes-desktop-entry-guard.service" \
+    "$GUARD_BIN"
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+  ok "desktop-entry guard removed"
 }
 
 # --- Hyprland autostart ------------------------------------------------------
@@ -548,6 +602,7 @@ remove_parts() {
     unlink_plugin
     unlink_shell_plugin
     unlink_exclusive_ws
+    unlink_desktop_guard
   else
     unlink_exclusive_ws
     ok "ollama, skills, plugin, and shell widget left alone (pass --all to remove them)"

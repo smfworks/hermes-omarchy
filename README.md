@@ -12,7 +12,7 @@ on any Omarchy machine:
 | Part | What it does |
 |---|---|
 | Ollama | systemd **user** service (`WantedBy=default.target`), enabled at login, verified serving `127.0.0.1:11434`. Uses the existing unit if present. |
-| Desktop entry | Packaged Electron `…/linux-unpacked/Hermes --no-sandbox`. `hermes desktop` rewrites this to a mise Python `Exec=` and then sudo-fails at autostart. |
+| Desktop entry | Packaged Electron `…/linux-unpacked/Hermes --no-sandbox`. User systemd path unit restores that Exec when `hermes desktop` rewrites the file to mise Python. |
 | Autostart | `o.launch_on_start("<unpacked Hermes> --no-sandbox")`. Not `hermes` (CLI) and not `hermes desktop` (sudo chrome-sandbox, no TTY → exit 1). |
 | Skills | Symlinks Omarchy's `omarchy` and `diagnose-crash` skills into `~/.hermes/skills` and every `~/.hermes/profiles/*/skills`. Same contract as `omarchy-provision-user`. |
 | Plugin | Symlinks this repo's `plugin/` into `~/.hermes/plugins/omarchy` (and existing profiles) and runs `hermes plugins enable omarchy`. Allowlisted theme/plugin/bar/menu/screenshot/shell-ping verbs; `--yes` on mutating plugin commands. Hidden off non-Omarchy hosts. |

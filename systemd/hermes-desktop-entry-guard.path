@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch Hermes .desktop for hermes-desktop rewrite
+
+[Path]
+PathModified=%h/.local/share/applications/hermes.desktop
+PathChanged=%h/.local/share/applications/hermes.desktop
+Unit=hermes-desktop-entry-guard.service
+
+[Install]
+WantedBy=default.target

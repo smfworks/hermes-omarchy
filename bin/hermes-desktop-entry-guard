@@ -1,0 +1,40 @@
+#!/bin/bash
+# Restore ~/.local/share/applications/hermes.desktop to the packaged
+# Electron binary with --no-sandbox. `hermes desktop` rewrites that file to
+# mise/python `hermes desktop`, which sudo-fails with no TTY.
+set -euo pipefail
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+ENTRY="${XDG_DATA_HOME:-$HOME/.local/share}/applications/hermes.desktop"
+ELECTRON="$HERMES_HOME/hermes-agent/apps/desktop/release/linux-unpacked/Hermes"
+ICON="$HERMES_HOME/hermes-agent/apps/desktop/assets/icon.png"
+[[ -f $ICON ]] || ICON="hermes"
+
+if [[ ! -x $ELECTRON ]]; then
+  echo "hermes-desktop-entry-guard: electron missing: $ELECTRON" >&2
+  exit 0
+fi
+
+desired="[Desktop Entry]
+Type=Application
+Name=Hermes
+GenericName=Hermes Desktop
+Comment=Launch Hermes Desktop
+Exec=$ELECTRON --no-sandbox
+Icon=$ICON
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=Hermes
+"
+
+if [[ -f $ENTRY ]] && grep -qF "Exec=$ELECTRON --no-sandbox" "$ENTRY"; then
+  exit 0
+fi
+
+mkdir -p "$(dirname "$ENTRY")"
+printf '%s' "$desired" >"$ENTRY"
+chmod 755 "$ENTRY"
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$(dirname "$ENTRY")" >/dev/null 2>&1 || true
+fi

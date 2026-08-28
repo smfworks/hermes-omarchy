@@ -1,0 +1,6 @@
+[Unit]
+Description=Restore Hermes desktop entry to Electron --no-sandbox
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/hermes-desktop-entry-guard
