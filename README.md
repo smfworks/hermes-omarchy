@@ -19,6 +19,7 @@ on any Omarchy machine:
 | Exclusive WS | `~/.config/hypr/hermes-exclusive.lua`: class `Hermes` stays on workspace 1 (full tile). Other apps that would open there go to workspace 2+. Dialogs, PiP, webcam, screensaver stay. `--no-exclusive-ws` to skip. |
 | Demo mode | `bin/hermes-omarchy-demo on\|off\|check`. Rounding/dim/blur, 90% presentation floats, WS2 scrolling, slim transparent bar (Mustafa pill kept). Reversible. |
 | Scene card | `bin/hermes-omarchy-scene`. Overlay `smf.scene-card` lower-third. Not a bar widget. |
+| Auto-sting | `bin/hermes-omarchy-roll beat|hide|preview`. Agent raises the card at the start of a shot. `preview` is titles only. |
 
 Bar **usage** is not this repo. Use Mustafa's widget (local `state.db` + remote gateway):
 
