@@ -1,0 +1,133 @@
+#!/bin/bash
+#
+# hermes-omarchy-scene — lower-third overlay for camera demos
+#
+#   install | remove | check
+#   show [--kicker TEXT] [--subtitle TEXT] [--duration MS] <title>
+#   hide
+#
+# Overlay plugin smf.scene-card. Not a bar widget. Clicks pass through.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+SRC="$REPO_ROOT/overlay-plugin"
+DEST="$HOME/.config/omarchy/plugins/smf.scene-card"
+ID="smf.scene-card"
+
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$1" >&2; }
+fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+json_escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+
+install_plugin() {
+  [[ -f $SRC/manifest.json && -f $SRC/SceneCard.qml ]] || { fail "overlay source missing: $SRC"; return 1; }
+  mkdir -p "$DEST"
+  cp -a "$SRC/manifest.json" "$SRC/SceneCard.qml" "$DEST/"
+  if ! omarchy plugin validate "$DEST"; then
+    fail "smf.scene-card failed omarchy plugin validate"
+    return 1
+  fi
+  ok "copied $DEST"
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  if omarchy plugin enable "$ID"; then
+    ok "enabled $ID"
+  else
+    warn "copied but not enabled (run: omarchy plugin enable $ID)"
+  fi
+}
+
+remove_plugin() {
+  omarchy plugin disable "$ID" >/dev/null 2>&1 || true
+  omarchy-shell -q shell hide "$ID" >/dev/null 2>&1 || true
+  if [[ -d $DEST && ! -L $DEST ]]; then
+    rm -rf "$DEST"
+    ok "removed $DEST"
+  else
+    ok "plugin dir not installed"
+  fi
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+}
+
+check_plugin() {
+  local rc=0
+  if [[ ! -f $DEST/manifest.json ]]; then
+    fail "not installed: $DEST"
+    return 1
+  fi
+  if ! omarchy plugin validate "$DEST" >/dev/null; then
+    fail "validate failed"
+    rc=1
+  else
+    ok "validate ok"
+  fi
+  if omarchy-shell shell listPlugins 2>/dev/null | python3 -c "
+import json,sys
+raw=sys.stdin.read()
+try:
+    data=json.loads(raw)
+except Exception:
+    sys.exit(2)
+found=next((p for p in data if p.get('id')=='smf.scene-card'), None)
+sys.exit(0 if found and found.get('enabled') else 1)
+"; then
+    ok "enabled in omarchy-shell"
+  else
+    fail "not enabled in omarchy-shell"
+    rc=1
+  fi
+  return "$rc"
+}
+
+show_card() {
+  local kicker="HERMES"
+  local subtitle=""
+  local duration="5000"
+  local title=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --kicker) kicker="${2:-}"; shift 2 ;;
+      --subtitle) subtitle="${2:-}"; shift 2 ;;
+      --duration) duration="${2:-}"; shift 2 ;;
+      -h|--help) usage; return 0 ;;
+      --) shift; break ;;
+      -*) fail "unknown option: $1"; return 2 ;;
+      *) title="$1"; shift; break ;;
+    esac
+  done
+  if [[ -n ${1:-} && -z $title ]]; then
+    title="$1"
+    shift
+  fi
+  [[ -n $title ]] || { fail "title required"; return 2; }
+  if [[ ! -f $DEST/manifest.json ]]; then
+    install_plugin
+  fi
+  local payload
+  payload=$(python3 -c 'import json,sys; print(json.dumps({"kicker":sys.argv[1],"title":sys.argv[2],"subtitle":sys.argv[3],"duration":int(sys.argv[4])}))' "$kicker" "$title" "$subtitle" "$duration")
+  omarchy-shell shell summon "$ID" "$payload"
+}
+
+hide_card() {
+  omarchy-shell shell hide "$ID"
+}
+
+action="${1:-}"
+shift || true
+case "$action" in
+  install) install_plugin ;;
+  remove) remove_plugin ;;
+  check) check_plugin ;;
+  show) show_card "$@" ;;
+  hide) hide_card ;;
+  -h|--help|"") usage; [[ -n $action ]] || exit 2 ;;
+  *) echo "unknown argument: $action" >&2; usage; exit 2 ;;
+esac

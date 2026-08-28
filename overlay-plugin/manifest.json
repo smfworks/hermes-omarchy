@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "smf.scene-card",
+  "name": "Scene card",
+  "version": "0.1.0",
+  "author": "SMF Works",
+  "license": "MIT",
+  "description": "Lower-third scene sting for Hermes-on-Omarchy demos. Overlay, not a bar widget.",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "SceneCard.qml"
+  }
+}

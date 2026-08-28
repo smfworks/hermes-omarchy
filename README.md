@@ -18,6 +18,7 @@ on any Omarchy machine:
 | Plugin | Symlinks this repo's `plugin/` into `~/.hermes/plugins/omarchy` (and existing profiles) and runs `hermes plugins enable omarchy`. Allowlisted theme/plugin/bar/menu/screenshot/shell-ping verbs; `--yes` on mutating plugin commands. Hidden off non-Omarchy hosts. |
 | Exclusive WS | `~/.config/hypr/hermes-exclusive.lua`: class `Hermes` stays on workspace 1 (full tile). Other apps that would open there go to workspace 2+. Dialogs, PiP, webcam, screensaver stay. `--no-exclusive-ws` to skip. |
 | Demo mode | `bin/hermes-omarchy-demo on\|off\|check`. Rounding/dim/blur, 90% presentation floats, WS2 scrolling, slim transparent bar (Mustafa pill kept). Reversible. |
+| Scene card | `bin/hermes-omarchy-scene`. Overlay `smf.scene-card` lower-third. Not a bar widget. |
 
 Bar **usage** is not this repo. Use Mustafa's widget (local `state.db` + remote gateway):
 
