@@ -1,0 +1,198 @@
+#!/bin/bash
+#
+# hermes-omarchy-demo — reversible camera mode for this Omarchy box
+#
+#   on    paint + slim transparent bar + 90% presentation floats + WS2 scrolling
+#   off   restore the backed-up bar and drop demo Hyprland overrides
+#   check exit 0 if demo mode is active
+#
+# Exclusive workspace 1 (Hermes-only) is a separate install piece and stays.
+
+set -euo pipefail
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+SRC_LUA="$REPO_ROOT/hypr/hermes-demo.lua"
+DEST_LUA="$HOME/.config/hypr/hermes-demo.lua"
+HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
+SHELL_JSON="$HOME/.config/omarchy/shell.json"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/hermes-demo"
+BACKUP_SHELL="$STATE_DIR/shell.json.bak"
+REQUIRE='require("hypr.hermes-demo")'
+FLAG="$STATE_DIR/on"
+
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$1" >&2; }
+fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+
+reload_hypr() {
+  hyprctl reload >/dev/null
+  local errs
+  errs="$(hyprctl configerrors 2>/dev/null || true)"
+  if [[ -n ${errs//[[:space:]]/} ]]; then
+    fail "hyprctl configerrors:"
+    printf '%s\n' "$errs" >&2
+    return 1
+  fi
+  ok "Hyprland reloaded"
+}
+
+ensure_require() {
+  mkdir -p "$(dirname "$HYPRLAND_LUA")"
+  [[ -f $HYPRLAND_LUA ]] || { fail "missing $HYPRLAND_LUA"; return 1; }
+  if grep -qF -- "$REQUIRE" "$HYPRLAND_LUA"; then
+    ok "require already present"
+    return 0
+  fi
+  if grep -q 'require("hypr.hermes-exclusive")' "$HYPRLAND_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    awk -v line="$REQUIRE" '
+      { print }
+      $0 ~ /require\("hypr.hermes-exclusive"\)/ && !seen { print line; seen=1 }
+    ' "$HYPRLAND_LUA" >"$tmp"
+    mv "$tmp" "$HYPRLAND_LUA"
+  else
+    printf '\n%s\n' "$REQUIRE" >>"$HYPRLAND_LUA"
+  fi
+  ok "added $REQUIRE"
+}
+
+strip_require() {
+  [[ -f $HYPRLAND_LUA ]] || return 0
+  if grep -qF -- "$REQUIRE" "$HYPRLAND_LUA"; then
+    local tmp
+    tmp="$(mktemp)"
+    grep -vF -- "$REQUIRE" "$HYPRLAND_LUA" >"$tmp" || true
+    mv "$tmp" "$HYPRLAND_LUA"
+    ok "removed require from $HYPRLAND_LUA"
+  fi
+}
+
+write_demo_bar() {
+  python3 - "$SHELL_JSON" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    data = json.load(f)
+bar = data.setdefault("bar", {})
+bar["transparent"] = True
+bar.setdefault("position", "top")
+bar["centerAnchor"] = "omarchy.clock"
+bar["layout"] = {
+    "left": [
+        {"id": "omarchy.menu"},
+        {"id": "omarchy.workspaces"},
+    ],
+    "center": [
+        {
+            "id": "omarchy.clock",
+            "format": "dddd HH:mm",
+            "formatAlt": "d MMMM 'W'ww yyyy",
+            "verticalFormat": "HH\n—\nmm",
+        },
+    ],
+    "right": [
+        {"id": "mustafaokur.hermes"},
+        {"id": "omarchy.audio"},
+        {"id": "omarchy.power"},
+    ],
+}
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+}
+
+demo_on() {
+  [[ -f $SRC_LUA ]] || { fail "missing $SRC_LUA"; return 1; }
+  [[ -f $SHELL_JSON ]] || { fail "missing $SHELL_JSON"; return 1; }
+  mkdir -p "$STATE_DIR"
+  if [[ ! -f $BACKUP_SHELL ]]; then
+    cp -a "$SHELL_JSON" "$BACKUP_SHELL"
+    ok "backed up bar to $BACKUP_SHELL"
+  else
+    ok "keeping existing bar backup"
+  fi
+  mkdir -p "$(dirname "$DEST_LUA")"
+  cp -f "$SRC_LUA" "$DEST_LUA"
+  ok "wrote $DEST_LUA"
+  ensure_require
+  write_demo_bar
+  ok "slim transparent bar (Mustafa pill kept)"
+  : >"$FLAG"
+  reload_hypr
+  echo "Demo on. Workspace 1 stays Hermes-only. New apps → 2+ (scrolling). Super+2 to follow."
+}
+
+demo_off() {
+  strip_require
+  if [[ -f $DEST_LUA ]]; then
+    rm -f "$DEST_LUA"
+    ok "removed $DEST_LUA"
+  fi
+  if [[ -f $BACKUP_SHELL ]]; then
+    cp -a "$BACKUP_SHELL" "$SHELL_JSON"
+    ok "restored $SHELL_JSON"
+  else
+    warn "no bar backup; left $SHELL_JSON as-is"
+  fi
+  rm -f "$FLAG"
+  if [[ -f $HYPRLAND_LUA ]]; then
+    reload_hypr || true
+  fi
+  echo "Demo off."
+}
+
+demo_check() {
+  local rc=0
+  if [[ ! -f $FLAG ]]; then
+    fail "demo flag missing ($FLAG)"
+    rc=1
+  else
+    ok "demo flag present"
+  fi
+  if [[ ! -f $DEST_LUA ]]; then
+    fail "missing $DEST_LUA"
+    rc=1
+  else
+    ok "demo lua present"
+  fi
+  if [[ ! -f $HYPRLAND_LUA ]] || ! grep -qF -- "$REQUIRE" "$HYPRLAND_LUA"; then
+    fail "require missing from $HYPRLAND_LUA"
+    rc=1
+  else
+    ok "require present"
+  fi
+  if command -v python3 >/dev/null && [[ -f $SHELL_JSON ]]; then
+    if python3 - "$SHELL_JSON" <<'PY'
+import json, sys
+bar = json.load(open(sys.argv[1])).get("bar") or {}
+layout = bar.get("layout") or {}
+right = [w.get("id") for w in layout.get("right") or []]
+ok = bar.get("transparent") is True and "mustafaokur.hermes" in right
+sys.exit(0 if ok else 1)
+PY
+    then
+      ok "bar transparent with Mustafa pill"
+    else
+      fail "bar is not in demo layout"
+      rc=1
+    fi
+  fi
+  return "$rc"
+}
+
+usage() {
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+action="${1:-}"
+case "$action" in
+  on) demo_on ;;
+  off) demo_off ;;
+  check) demo_check ;;
+  -h|--help|"") usage; [[ -n $action ]] || exit 2 ;;
+  *) echo "unknown argument: $action" >&2; usage; exit 2 ;;
+esac
