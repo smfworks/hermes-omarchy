@@ -1,0 +1,227 @@
+#!/bin/bash
+#
+# hermes-omarchy-fire — bind a Hyprland window (or the whole desktop) to the
+# Fire HD VNC session.
+#
+# wayvnc cannot capture Hyprland toplevels (no matching foreign-toplevel id).
+# Instead we park the chosen window on a headless output and point wayvnc at it.
+#
+#   start                 wayvnc (detached) + USB reverse + headless output
+#   windows [--json]      list bindable windows
+#   bind [class]          gum-pick if omitted; move that window to the Fire
+#   desktop               Fire shows the laptop screen again; restore window
+#   status
+#   stop                  detach capture, keep wayvnc listening
+#
+set -euo pipefail
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/hermes-fire"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/wayvnc/config"
+HEADLESS_NAME_FILE="$STATE/output"
+BOUND_FILE="$STATE/bound" # address<TAB>from_ws<TAB>class
+LAPTOP_OUT="eDP-1"
+
+ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33m!\033[0m %s\n' "$1" >&2; }
+fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
+
+mkdir -p "$STATE"
+
+usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
+
+wayvnc_up() {
+  pgrep -x wayvnc >/dev/null && wayvncctl version >/dev/null 2>&1
+}
+
+ensure_wayvnc() {
+  if wayvnc_up; then
+    return 0
+  fi
+  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  if [[ ! -f $CONFIG ]]; then
+    mkdir -p "$(dirname "$CONFIG")"
+    printf 'address=127.0.0.1\nport=5900\n' >"$CONFIG"
+  fi
+  nohup wayvnc -D -C "$CONFIG" -R -f 15 -n Omarchy >/tmp/wayvnc-fire.log 2>&1 &
+  local i
+  for i in $(seq 1 20); do
+    wayvnc_up && return 0
+    sleep 0.15
+  done
+  fail "wayvnc failed to start (see /tmp/wayvnc-fire.log)"
+  return 1
+}
+
+ensure_reverse() {
+  command -v adb >/dev/null || return 0
+  adb start-server >/dev/null 2>&1 || true
+  adb wait-for-device >/dev/null 2>&1 || return 0
+  adb reverse tcp:5900 tcp:5900 >/dev/null 2>&1 || true
+}
+
+headless_name() {
+  hyprctl monitors -j | python3 -c '
+import json,sys
+ms=json.load(sys.stdin)
+hs=[m["name"] for m in ms if str(m.get("name","")).startswith("HEADLESS")]
+print(hs[-1] if hs else "")
+'
+}
+
+ensure_headless() {
+  local name
+  name="$(headless_name)"
+  if [[ -n $name ]]; then
+    printf '%s' "$name" >"$HEADLESS_NAME_FILE"
+    printf '%s' "$name"
+    return 0
+  fi
+  hyprctl output create headless >/dev/null
+  sleep 0.25
+  name="$(headless_name)"
+  [[ -n $name ]] || { fail "failed to create headless output"; return 1; }
+  printf '%s' "$name" >"$HEADLESS_NAME_FILE"
+  printf '%s' "$name"
+}
+
+headless_ws() {
+  local name="${1:-}"
+  hyprctl monitors -j | python3 -c '
+import json,sys
+want=sys.argv[1]
+for m in json.load(sys.stdin):
+  if m.get("name")==want:
+    print((m.get("activeWorkspace") or {}).get("id") or "")
+    break
+' "$name"
+}
+
+windows_json() {
+  hyprctl clients -j | python3 -c '
+import json,sys
+cs=json.load(sys.stdin)
+out=[]
+for c in cs:
+  if not c.get("mapped"): continue
+  cls=c.get("class") or ""
+  if not cls: continue
+  out.append({
+    "class": cls,
+    "title": c.get("title") or "",
+    "workspace": (c.get("workspace") or {}).get("id"),
+    "address": c.get("address") or "",
+  })
+print(json.dumps(out))
+'
+}
+
+restore_bound() {
+  [[ -f $BOUND_FILE ]] || return 0
+  local addr ws
+  addr=$(cut -f1 "$BOUND_FILE")
+  ws=$(cut -f2 "$BOUND_FILE")
+  rm -f "$BOUND_FILE"
+  [[ -n $addr && -n $ws ]] || return 0
+  hyprctl dispatch "hl.dsp.window.move({ workspace = '$ws', follow = false, window = 'address:$addr' })" >/dev/null || true
+}
+
+cmd_windows() {
+  if [[ ${1:-} == --json ]]; then
+    windows_json
+    return
+  fi
+  windows_json | python3 -c '
+import json,sys
+for w in json.load(sys.stdin):
+  print("%s\tws %s\t%s" % (w["class"], w["workspace"], w["title"][:60]))
+'
+}
+
+cmd_bind() {
+  local sel="${1:-}"
+  local addr="" cls="" from=""
+  if [[ -z $sel ]]; then
+    if [[ -t 0 ]] && command -v gum >/dev/null; then
+      local line
+      line=$(cmd_windows | gum choose) || return 1
+      cls=$(printf '%s' "$line" | cut -f1)
+      sel=$cls
+    else
+      fail "usage: hermes-omarchy-fire bind <class|address>"
+      return 2
+    fi
+  fi
+  read -r addr cls from < <(windows_json | python3 -c '
+import json,sys
+want=sys.argv[1]
+rows=json.load(sys.stdin)
+hit=None
+for w in rows:
+  if w["address"]==want or w["address"].endswith(want.removeprefix("0x")):
+    hit=w; break
+if hit is None:
+  matches=[w for w in rows if w["class"]==want]
+  if len(matches)==1: hit=matches[0]
+  elif len(matches)>1:
+    sys.stderr.write("multiple windows with class %s; pass an address\n" % want)
+    sys.exit(3)
+if hit is None:
+  sys.stderr.write("no window %s\n" % want)
+  sys.exit(4)
+print(hit["address"], hit["class"], hit["workspace"] or "")
+' "$sel") || return 1
+  ensure_wayvnc
+  local out ws
+  out="$(ensure_headless)"
+  ws="$(headless_ws "$out")"
+  [[ -n $ws ]] || { fail "headless has no workspace"; return 1; }
+  restore_bound
+  hyprctl dispatch "hl.dsp.window.move({ workspace = '$ws', follow = false, window = 'address:$addr' })" >/dev/null
+  printf '%s\t%s\t%s\n' "$addr" "${from:-1}" "$cls" >"$BOUND_FILE"
+  wayvncctl attach "${WAYLAND_DISPLAY:-wayland-1}" --output="$out" >/dev/null
+  ensure_reverse
+  ok "Fire bound to $cls ($addr) on $out ws $ws. Reconnect MultiVNC if stale."
+}
+
+cmd_desktop() {
+  ensure_wayvnc
+  restore_bound
+  wayvncctl attach "${WAYLAND_DISPLAY:-wayland-1}" --output="$LAPTOP_OUT" >/dev/null
+  ensure_reverse
+  ok "Fire showing laptop ($LAPTOP_OUT)"
+}
+
+cmd_start() {
+  ensure_wayvnc
+  ensure_reverse
+  wayvncctl attach "${WAYLAND_DISPLAY:-wayland-1}" --output="$LAPTOP_OUT" >/dev/null 2>&1 || true
+  ok "wayvnc listening on 127.0.0.1:5900 (USB reverse). MultiVNC → 127.0.0.1:5900"
+}
+
+cmd_status() {
+  if wayvnc_up; then ok "wayvnc up"; else fail "wayvnc down"; fi
+  wayvncctl output-list 2>/dev/null || true
+  wayvncctl client-list 2>/dev/null || true
+  [[ -f $BOUND_FILE ]] && echo "bound: $(tr '\t' ' ' <"$BOUND_FILE")" || echo "bound: (desktop)"
+  echo "headless: $(headless_name || echo none)"
+}
+
+cmd_stop() {
+  restore_bound
+  wayvncctl attach "${WAYLAND_DISPLAY:-wayland-1}" --output="$LAPTOP_OUT" >/dev/null 2>&1 || true
+  ok "restored desktop capture; wayvnc still listening"
+}
+
+action="${1:-}"
+shift || true
+case "$action" in
+  start) cmd_start ;;
+  windows) cmd_windows "$@" ;;
+  bind) cmd_bind "$@" ;;
+  desktop) cmd_desktop ;;
+  status) cmd_status ;;
+  stop) cmd_stop ;;
+  -h|--help|"") usage; [[ -n $action ]] || exit 2 ;;
+  *) echo "unknown: $action" >&2; usage; exit 2 ;;
+esac

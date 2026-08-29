@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "smf.fire-display",
+  "name": "Fire display",
+  "version": "0.1.0",
+  "author": "SMF Works",
+  "license": "MIT",
+  "description": "Pick which Hyprland window the Fire tablet VNC shows this session.",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "FireDisplay.qml"
+  }
+}
