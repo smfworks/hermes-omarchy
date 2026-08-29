@@ -53,13 +53,17 @@ Item {
   }
 
   function bindClass(cls) {
-    Quickshell.execDetached([root.fireBin, "bind", cls])
-    root.dismiss()
+    if (root.busy) return
+    root.busy = true
+    bindProc.command = [root.fireBin, "bind", cls]
+    bindProc.running = true
   }
 
   function bindDesktop() {
-    Quickshell.execDetached([root.fireBin, "desktop"])
-    root.dismiss()
+    if (root.busy) return
+    root.busy = true
+    bindProc.command = [root.fireBin, "desktop"]
+    bindProc.running = true
   }
 
   Process {
@@ -91,6 +95,20 @@ Item {
         try { root.windows = JSON.parse(text || "[]") }
         catch (e) { root.windows = [] }
       }
+    }
+  }
+
+  Process {
+    id: bindProc
+    command: [root.fireBin, "status", "--json"]
+    running: false
+    stdout: StdioCollector { waitForEnd: true }
+    onExited: {
+      root.busy = false
+      if (exitCode === 0)
+        root.dismiss()
+      else
+        root.refresh()
     }
   }
 

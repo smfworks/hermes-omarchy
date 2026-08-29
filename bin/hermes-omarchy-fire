@@ -28,6 +28,14 @@ fail() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; }
 
 mkdir -p "$STATE"
 
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [[ -z ${HYPRLAND_INSTANCE_SIGNATURE:-} && -d ${XDG_RUNTIME_DIR}/hypr ]]; then
+  _his=$(ls -1t "${XDG_RUNTIME_DIR}/hypr" 2>/dev/null | head -1 || true)
+  [[ -n $_his ]] && export HYPRLAND_INSTANCE_SIGNATURE="$_his"
+  unset _his
+fi
+
 usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
 
 wayvnc_up() {
