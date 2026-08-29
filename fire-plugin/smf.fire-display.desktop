@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fire Display
+GenericName=Fire tablet window picker
+Comment=Pick which window the Fire tablet VNC shows this session
+Exec=omarchy-shell shell summon smf.fire-display
+Icon=video-display
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+NoDisplay=false
