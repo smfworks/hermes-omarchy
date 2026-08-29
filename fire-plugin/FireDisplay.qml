@@ -12,6 +12,9 @@ Item {
   property var manifest: null
   property bool opened: false
   property var windows: []
+  property bool fireOn: false
+  property bool busy: false
+  property var bound: null
   property string fireBin: Quickshell.env("HOME") + "/.local/bin/hermes-omarchy-fire"
 
   readonly property int pad: Style.space(16)
@@ -19,8 +22,7 @@ Item {
 
   function open(payloadJson) {
     root.opened = true
-    listProc.running = false
-    listProc.running = true
+    root.refresh()
   }
 
   function close() { root.opened = false }
@@ -36,6 +38,20 @@ Item {
     else root.open("{}")
   }
 
+  function refresh() {
+    statusProc.running = false
+    statusProc.running = true
+    listProc.running = false
+    listProc.running = true
+  }
+
+  function setPower(want) {
+    if (root.busy) return
+    root.busy = true
+    powerProc.command = [root.fireBin, want ? "on" : "off"]
+    powerProc.running = true
+  }
+
   function bindClass(cls) {
     Quickshell.execDetached([root.fireBin, "bind", cls])
     root.dismiss()
@@ -44,6 +60,25 @@ Item {
   function bindDesktop() {
     Quickshell.execDetached([root.fireBin, "desktop"])
     root.dismiss()
+  }
+
+  Process {
+    id: statusProc
+    command: [root.fireBin, "status", "--json"]
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          const s = JSON.parse(text || "{}")
+          root.fireOn = !!s.on
+          root.bound = s.bound || null
+        } catch (e) {
+          root.fireOn = false
+          root.bound = null
+        }
+      }
+    }
   }
 
   Process {
@@ -56,6 +91,17 @@ Item {
         try { root.windows = JSON.parse(text || "[]") }
         catch (e) { root.windows = [] }
       }
+    }
+  }
+
+  Process {
+    id: powerProc
+    command: [root.fireBin, "on"]
+    running: false
+    stdout: StdioCollector { waitForEnd: true }
+    onExited: {
+      root.busy = false
+      root.refresh()
     }
   }
 
@@ -116,8 +162,22 @@ Item {
           width: parent.width
         }
 
+        Toggle {
+          width: parent.width
+          label: "Tablet capture"
+          description: root.busy
+            ? "Working…"
+            : (root.fireOn
+              ? (root.bound && root.bound.class
+                  ? ("On · bound to " + root.bound.class)
+                  : "On · whole laptop screen")
+              : "Off — MultiVNC will disconnect")
+          checked: root.fireOn
+          onClicked: root.setPower(!root.fireOn)
+        }
+
         Repeater {
-          model: root.windows
+          model: root.fireOn ? root.windows : []
           Rectangle {
             required property var modelData
             width: inner.width
@@ -146,6 +206,7 @@ Item {
         }
 
         Rectangle {
+          visible: root.fireOn
           width: inner.width
           height: Style.space(36)
           color: Util.alpha(Color.menu.selectedBackground, deskMa.containsMouse ? 1 : 0)

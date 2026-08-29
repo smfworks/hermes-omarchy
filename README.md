@@ -20,7 +20,7 @@ on any Omarchy machine:
 | Demo mode | `bin/hermes-omarchy-demo on\|off\|check`. Rounding/dim/blur, 90% presentation floats, WS2 scrolling, slim transparent bar (Mustafa pill kept). Reversible. |
 | Scene card | `bin/hermes-omarchy-scene`. Overlay `smf.scene-card` lower-third. Not a bar widget. |
 | Auto-sting | `bin/hermes-omarchy-roll beat|hide|preview`. Agent raises the card at the start of a shot. `preview` is titles only. |
-| Fire display | `bin/hermes-omarchy-fire`. Park a window on a headless output; Fire VNC shows that. Overlay picker `smf.fire-display` — Apps → **Fire Display**. |
+| Fire display | `bin/hermes-omarchy-fire`. Park a window on a headless output; Fire VNC shows that. Overlay picker `smf.fire-display` — Apps → **Fire Display**. Toggle **Tablet capture** on/off. |
 
 Bar **usage** is not this repo. Use Mustafa's widget (local `state.db` + remote gateway):
 

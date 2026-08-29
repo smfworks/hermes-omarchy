@@ -6,12 +6,13 @@
 # wayvnc cannot capture Hyprland toplevels (no matching foreign-toplevel id).
 # Instead we park the chosen window on a headless output and point wayvnc at it.
 #
-#   start                 wayvnc (detached) + USB reverse + headless output
+#   start|on              wayvnc (detached) + USB reverse; Fire shows laptop
+#   off                   restore bound window, kill wayvnc, drop headless
 #   windows [--json]      list bindable windows
 #   bind [class]          gum-pick if omitted; move that window to the Fire
 #   desktop               Fire shows the laptop screen again; restore window
-#   status
-#   stop                  detach capture, keep wayvnc listening
+#   status [--json]
+#   stop                  restore window; keep wayvnc listening (laptop capture)
 #
 set -euo pipefail
 
@@ -200,11 +201,37 @@ cmd_start() {
 }
 
 cmd_status() {
-  if wayvnc_up; then ok "wayvnc up"; else fail "wayvnc down"; fi
+  local up=0
+  wayvnc_up && up=1
+  local bound=""
+  [[ -f $BOUND_FILE ]] && bound=$(cat "$BOUND_FILE")
+  local hl
+  hl="$(headless_name)"
+  if [[ ${1:-} == --json ]]; then
+    python3 -c '
+import json, sys
+up = int(sys.argv[1])
+bound = sys.argv[2]
+hl = sys.argv[3]
+addr = ws = cls = ""
+if bound:
+    parts = bound.split("\t")
+    addr = parts[0] if parts else ""
+    ws = parts[1] if len(parts) > 1 else ""
+    cls = parts[2] if len(parts) > 2 else ""
+print(json.dumps({
+    "on": bool(up),
+    "bound": {"address": addr, "from_ws": ws, "class": cls} if addr else None,
+    "headless": hl or "",
+}))
+' "$up" "$bound" "$hl"
+    return
+  fi
+  if (( up )); then ok "wayvnc up"; else fail "wayvnc down"; fi
   wayvncctl output-list 2>/dev/null || true
   wayvncctl client-list 2>/dev/null || true
-  [[ -f $BOUND_FILE ]] && echo "bound: $(tr '\t' ' ' <"$BOUND_FILE")" || echo "bound: (desktop)"
-  echo "headless: $(headless_name || echo none)"
+  [[ -n $bound ]] && echo "bound: $(tr '\t' ' ' <<<"$bound")" || echo "bound: (desktop)"
+  echo "headless: ${hl:-none}"
 }
 
 cmd_stop() {
@@ -213,14 +240,30 @@ cmd_stop() {
   ok "restored desktop capture; wayvnc still listening"
 }
 
+cmd_off() {
+  restore_bound
+  if wayvnc_up; then
+    wayvncctl wayvnc-exit >/dev/null 2>&1 || pkill -x wayvnc || true
+    sleep 0.2
+  fi
+  local name
+  name="$(headless_name)"
+  if [[ -n $name ]]; then
+    hyprctl output remove "$name" >/dev/null 2>&1 || true
+  fi
+  rm -f "$HEADLESS_NAME_FILE"
+  ok "Fire display off"
+}
+
 action="${1:-}"
 shift || true
 case "$action" in
-  start) cmd_start ;;
+  start|on) cmd_start ;;
+  off) cmd_off ;;
   windows) cmd_windows "$@" ;;
   bind) cmd_bind "$@" ;;
   desktop) cmd_desktop ;;
-  status) cmd_status ;;
+  status) cmd_status "$@" ;;
   stop) cmd_stop ;;
   -h|--help|"") usage; [[ -n $action ]] || exit 2 ;;
   *) echo "unknown: $action" >&2; usage; exit 2 ;;
