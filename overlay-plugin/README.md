@@ -1,7 +1,7 @@
 # smf.scene-card
 
 Lower-third overlay for Hermes-on-Omarchy camera demos. Not a bar widget.
-Does not replace `mustafaokur.hermes`.
+The bar widget is [smfworks/smf-hermes](https://github.com/smfworks/smf-hermes).
 
 ## Install
 

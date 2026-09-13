@@ -1,24 +1,15 @@
-# smf.hermes
+# smf.hermes (bundled stub)
 
-Optional Omarchy bar **launch/status** stub. Not the usage meter.
-
-For tokens / local vs remote gateway, install Mustafa's widget instead:
+The published Omarchy bar widget lives at [smfworks/smf-hermes](https://github.com/smfworks/smf-hermes).
 
 ```bash
-omarchy plugin add https://github.com/okurmustafa/omarchy-hermes.git --enable --yes
+omarchy plugin add https://github.com/smfworks/smf-hermes.git --enable --yes
 ```
 
-Do not enable this stub next to that plugin — two Hermes pills.
+Contract: `schemaVersion: 1`, id `smf.hermes` (not `omarchy.*`), kind `bar-widget`. Prefer that repo so `omarchy plugin update` works.
 
-## This stub
+This folder is an optional local copy (`bin/hermes-omarchy-setup install --shell-plugin`). Do not enable it next to the published plugin — two Hermes pills.
 
-- id `smf.hermes` (not `omarchy.*`)
-- kind `bar-widget`
-- No symlinks (`omarchy plugin validate` refuses them)
-
-```bash
-# toolkit opt-in only
-bin/hermes-omarchy-setup install --shell-plugin
-```
+Do not confuse this with Mustafa's token-usage meter ([okurmustafa/omarchy-hermes](https://github.com/okurmustafa/omarchy-hermes)).
 
 Left click: panel. Right click: launch Hermes desktop. Middle click: refresh.
